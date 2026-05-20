@@ -62,6 +62,9 @@ Variables minimales :
 - `MONGO_URL`
 - `DB_NAME`
 - `SECRET_KEY`
+- `BOOTSTRAP_ADMIN_EMAIL`
+- `BOOTSTRAP_ADMIN_PASSWORD`
+- `ALLOW_GLOBAL_API_KEY_FALLBACK=false`
 - `SERPER_API_KEY`
 - `PAPPERS_API_KEY`
 - `GOOGLE_API_KEY`
@@ -71,6 +74,19 @@ Exemple :
 
 - domaine public : `https://app.prospectlocal.example`
 - `CORS_ALLOW_ORIGINS=https://app.prospectlocal.example`
+
+Pour un premier acces securise sur une base neuve, tu peux aussi definir :
+
+- `BOOTSTRAP_ADMIN_EMAIL`
+- `BOOTSTRAP_ADMIN_PASSWORD`
+
+Au demarrage, l'app cree ou repare automatiquement ce compte en administrateur actif et valide.
+
+Pour un vrai mode multi-comptes securise, definir aussi :
+
+- `ALLOW_GLOBAL_API_KEY_FALLBACK=false`
+
+Comme ca, les utilisateurs sans cles personnelles ne peuvent pas utiliser des cles partagees par erreur.
 
 ## 3. Build frontend heberge
 
@@ -148,6 +164,9 @@ Une fois le repo pousse sur GitHub :
    - `MONGO_URL`
    - `DB_NAME`
    - `SECRET_KEY`
+   - `BOOTSTRAP_ADMIN_EMAIL`
+   - `BOOTSTRAP_ADMIN_PASSWORD`
+   - `ALLOW_GLOBAL_API_KEY_FALLBACK=false`
    - `SERPER_API_KEY`
    - `PAPPERS_API_KEY`
    - `GOOGLE_API_KEY`
@@ -159,6 +178,22 @@ Le service Railway servira ensuite :
 
 - l'app web sur `/`
 - l'API sur `/api`
+
+## 5 ter. Workflow simple pour les futures mises a jour
+
+Une fois le repo GitHub relie a Railway, la mise a jour de l'URL se fait comme ceci :
+
+1. modifier le code local dans [prospectlocal_source](C:/Users/AndyC/Documents/Codex/PROSPECTLOCAL.SOURCE/prospectlocal_source)
+2. lancer [publish_railway_update.cmd](C:/Users/AndyC/Documents/Codex/PROSPECTLOCAL.SOURCE/prospectlocal_source/publish_railway_update.cmd)
+3. le script :
+   - synchronise le dossier local vers le clone GitHub
+   - commit les changements
+   - push sur `main`
+4. Railway redeploie automatiquement l'URL
+
+Si tu veux seulement preparer le repo local sans publier tout de suite :
+
+- lancer [sync_railway_repo.cmd](C:/Users/AndyC/Documents/Codex/PROSPECTLOCAL.SOURCE/prospectlocal_source/sync_railway_repo.cmd)
 
 ## 6. Endpoint de sante
 

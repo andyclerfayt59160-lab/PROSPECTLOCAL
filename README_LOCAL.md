@@ -190,3 +190,13 @@ le produit et les builds desktop.
   - [Dockerfile.frontend.hosted](C:/Users/AndyC/Documents/Codex/PROSPECTLOCAL.SOURCE/prospectlocal_source/Dockerfile.frontend.hosted)
   - [docker-compose.hosted.yml](C:/Users/AndyC/Documents/Codex/PROSPECTLOCAL.SOURCE/prospectlocal_source/docker-compose.hosted.yml)
   - [backend/.env.hosted.sample](C:/Users/AndyC/Documents/Codex/PROSPECTLOCAL.SOURCE/prospectlocal_source/backend/.env.hosted.sample)
+
+#### Workflow simple pour mettre a jour Railway
+
+1. Modifier l'app dans [prospectlocal_source](C:/Users/AndyC/Documents/Codex/PROSPECTLOCAL.SOURCE/prospectlocal_source)
+2. Lancer [publish_railway_update.cmd](C:/Users/AndyC/Documents/Codex/PROSPECTLOCAL.SOURCE/prospectlocal_source/publish_railway_update.cmd)
+3. Attendre le redeploiement automatique Railway
+
+Si tu veux seulement mettre a jour le clone GitHub local sans publier :
+
+- lancer [sync_railway_repo.cmd](C:/Users/AndyC/Documents/Codex/PROSPECTLOCAL.SOURCE/prospectlocal_source/sync_railway_repo.cmd)

@@ -139,42 +139,26 @@ export default function DashboardScreen() {
       setNotifications(notifResponse.data.notifications || []);
       setUnreadCount(notifResponse.data.unread_count || 0);
       
-      // Check API keys status for onboarding
-      // ADMIN users bypass onboarding check - they manage global keys
-      if (parsedUser.role === 'admin') {
-        setApiKeysStatus({
-          hasGoogleKey: true,
-          hasSerperKey: true,
-          hasPappersKey: true
+      // Every user needs personal keys in the hosted app.
+      try {
+        const keysResponse = await axios.get(`${API_URL}/api/user/api-keys`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
+        const hasGoogle = keysResponse.data.has_google_key || false;
+        const hasSerper = keysResponse.data.has_serper_key || false;
+        const hasPappers = keysResponse.data.has_pappers_key || false;
+        
+        setApiKeysStatus({
+          hasGoogleKey: hasGoogle,
+          hasSerperKey: hasSerper,
+          hasPappersKey: hasPappers
+        });
+        
+        setShowOnboarding(!hasGoogle || !hasSerper);
+      } catch (error) {
+        console.error('Error checking API keys:', error);
+        // Don't show onboarding on error - don't block the user
         setShowOnboarding(false);
-      } else {
-        try {
-          const keysResponse = await axios.get(`${API_URL}/api/user/api-keys`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const hasGoogle = keysResponse.data.has_google_key || false;
-          const hasSerper = keysResponse.data.has_serper_key || false;
-          const hasPappers = keysResponse.data.has_pappers_key || false;
-          
-          setApiKeysStatus({
-            hasGoogleKey: hasGoogle,
-            hasSerperKey: hasSerper,
-            hasPappersKey: hasPappers
-          });
-          
-          // Show onboarding ONLY if Google AND Serper keys are BOTH missing
-          // If at least one is configured, user has started setup - don't block
-          if (!hasGoogle && !hasSerper) {
-            setShowOnboarding(true);
-          } else {
-            setShowOnboarding(false);
-          }
-        } catch (error) {
-          console.error('Error checking API keys:', error);
-          // Don't show onboarding on error - don't block the user
-          setShowOnboarding(false);
-        }
       }
       
     } catch (error) {

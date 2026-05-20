@@ -166,6 +166,12 @@ db = client[os.environ['DB_NAME']]
 SERPER_API_KEY = os.environ.get('SERPER_API_KEY', '')
 PAPPERS_API_KEY = os.environ.get('PAPPERS_API_KEY', '')
 
+
+def allow_global_api_key_fallback() -> bool:
+    """Allow a hosted instance to disable shared fallback API keys."""
+    raw_value = (os.environ.get("ALLOW_GLOBAL_API_KEY_FALLBACK") or "true").strip().lower()
+    return raw_value not in {"0", "false", "no", "off"}
+
 # Create the main app
 app = FastAPI(title="Prospection Scanner API")
 api_router = APIRouter(prefix="/api")
@@ -227,7 +233,7 @@ logger = logging.getLogger(__name__)
 # ============= API KEYS HELPER =============
 
 async def fetch_user_api_keys(user_id: str) -> dict:
-    """Get user's API keys, falling back to global keys if not set"""
+    """Get user's API keys, optionally falling back to global keys if allowed."""
     user = await db.users.find_one({"id": user_id})
     
     # User's keys take priority, fall back to global env vars
@@ -235,15 +241,18 @@ async def fetch_user_api_keys(user_id: str) -> dict:
     serper_key = user.get("serper_api_key") if user else None
     pappers_key = user.get("pappers_api_key") if user else None
 
+    fallback_allowed = allow_global_api_key_fallback()
+
     return {
-        "google_api_key": google_key or os.environ.get("GOOGLE_API_KEY", ""),
-        "serper_api_key": serper_key or SERPER_API_KEY,
-        "pappers_api_key": pappers_key or PAPPERS_API_KEY,
+        "google_api_key": google_key or (os.environ.get("GOOGLE_API_KEY", "") if fallback_allowed else ""),
+        "serper_api_key": serper_key or (SERPER_API_KEY if fallback_allowed else ""),
+        "pappers_api_key": pappers_key or (PAPPERS_API_KEY if fallback_allowed else ""),
         "using_own_keys": {
             "google": bool(google_key),
             "serper": bool(serper_key),
             "pappers": bool(pappers_key),
-        }
+        },
+        "global_fallback_enabled": fallback_allowed,
     }
 
 
@@ -951,6 +960,49 @@ async def search_pappers_companies(
 
 # ============= INITIALIZATION =============
 
+async def ensure_admin_account(
+    email: str,
+    password: str,
+    *,
+    label: str,
+    update_existing: bool = False,
+):
+    """Create or repair an admin account used to access the app."""
+    normalized_email = (email or "").strip().lower()
+    normalized_password = (password or "").strip()
+
+    if not normalized_email or not normalized_password:
+        return
+
+    existing_user = await db.users.find_one({"email": normalized_email})
+    admin_payload = {
+        "email": normalized_email,
+        "password_hash": get_password_hash(normalized_password),
+        "role": Role.ADMIN,
+        "is_approved": True,
+        "is_active": True,
+    }
+
+    if existing_user:
+        if update_existing:
+            await db.users.update_one(
+                {"id": existing_user["id"]},
+                {"$set": admin_payload},
+            )
+            logger.info(f"[OK] Updated bootstrap admin account ({label})")
+        return
+
+    admin = User(
+        email=normalized_email,
+        password_hash=admin_payload["password_hash"],
+        role=Role.ADMIN,
+    )
+    admin_document = admin.dict()
+    admin_document["is_approved"] = True
+    admin_document["is_active"] = True
+    await db.users.insert_one(admin_document)
+    logger.info(f"[OK] Created admin account ({label})")
+
 @app.on_event("startup")
 async def startup():
     """Initialize database with activities seed"""
@@ -963,16 +1015,26 @@ async def startup():
             await db.activities.insert_many(activities)
             logger.info(f"[OK] Inserted {len(activities)} activities")
         
-        # Create default admin user if not exists
-        admin_exists = await db.users.find_one({"email": "admin@prospection.com"})
-        if not admin_exists:
-            admin = User(
-                email="admin@prospection.com",
-                password_hash=get_password_hash("admin123"),
-                role=Role.ADMIN
+        # Create the built-in fallback admin account.
+        await ensure_admin_account(
+            "admin@prospection.com",
+            "admin123",
+            label="default admin@prospection.com",
+            update_existing=False,
+        )
+
+        # Optionally create or repair a real admin account for hosted environments.
+        bootstrap_admin_email = (os.environ.get("BOOTSTRAP_ADMIN_EMAIL") or "").strip()
+        bootstrap_admin_password = (os.environ.get("BOOTSTRAP_ADMIN_PASSWORD") or "").strip()
+        if bootstrap_admin_email and bootstrap_admin_password:
+            await ensure_admin_account(
+                bootstrap_admin_email,
+                bootstrap_admin_password,
+                label=f"bootstrap {bootstrap_admin_email}",
+                update_existing=True,
             )
-            await db.users.insert_one(admin.dict())
-            logger.info("[OK] Created default admin user (admin@prospection.com / admin123)")
+        elif bootstrap_admin_email or bootstrap_admin_password:
+            logger.warning("[WARN] BOOTSTRAP_ADMIN_EMAIL / BOOTSTRAP_ADMIN_PASSWORD incomplets - bootstrap admin ignore")
         
         # Start surveillance background loop
         logger.info("Starting surveillance background engine...")
@@ -1030,21 +1092,17 @@ async def create_scan(
 ):
     """Create new scan and start processing"""
     
-    # SECURITY: Check if user has their own API keys (admin bypass)
+    # SECURITY: every user needs personal keys for web scans.
     user = await db.users.find_one({"id": current_user["sub"]})
-    is_admin = user.get("role") == "admin" if user else False
-    
-    if not is_admin:
-        # Non-admin users MUST have their own Google API key to scan
-        user_google_key = user.get("google_api_key") if user else None
-        user_serper_key = user.get("serper_api_key") if user else None
-        
-        if not user_google_key or not user_serper_key:
-            logger.warning(f"[BLOCK] User {current_user.get('email', 'unknown')} tried to scan without personal API keys")
-            raise HTTPException(
-                status_code=403, 
-                detail="Vous devez configurer vos clés API personnelles (Google et Serper) avant de pouvoir effectuer des scans. Rendez-vous dans Paramètres > Clés API."
-            )
+    user_google_key = user.get("google_api_key") if user else None
+    user_serper_key = user.get("serper_api_key") if user else None
+
+    if not user_google_key or not user_serper_key:
+        logger.warning(f"[BLOCK] User {current_user.get('email', 'unknown')} tried to scan without personal API keys")
+        raise HTTPException(
+            status_code=403,
+            detail="Vous devez configurer vos clés API personnelles (Google et Serper) avant de pouvoir effectuer des scans. Rendez-vous dans Paramètres > Clés API."
+        )
     
     # Determine activities to scan based on mode
     activities_to_scan = []
@@ -4580,19 +4638,15 @@ async def pappers_mass_scan(
     """
     user_id = current_user["sub"]
     
-    # Check user has API keys
+    # SECURITY: every user needs personal keys for Pappers scans.
     user = await db.users.find_one({"id": user_id})
-    is_admin = user.get("role") == "admin" if user else False
-    
-    if not is_admin:
-        user_pappers_key = user.get("pappers_api_key") if user else None
-        user_serper_key = user.get("serper_api_key") if user else None
-        
-        if not user_pappers_key:
-            raise HTTPException(
-                status_code=403,
-                detail="Vous devez configurer votre clé API Pappers pour utiliser cette fonctionnalité."
-            )
+    user_pappers_key = user.get("pappers_api_key") if user else None
+
+    if not user_pappers_key:
+        raise HTTPException(
+            status_code=403,
+            detail="Vous devez configurer votre clé API Pappers personnelle pour utiliser cette fonctionnalité."
+        )
     
     # Get API keys
     user_keys = await fetch_user_api_keys(user_id)

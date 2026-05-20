@@ -11,7 +11,7 @@ import {
   Platform,
   Linking,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
@@ -77,6 +77,8 @@ const API_INFO = {
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ onboarding?: string }>();
+  const onboardingMode = params.onboarding === '1';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [apiKeys, setApiKeys] = useState({
@@ -147,6 +149,7 @@ export default function SettingsScreen() {
     databaseTarget: '',
     databaseName: '',
   });
+  const requiredKeysReady = keyStatus.has_google_api_key && keyStatus.has_serper_api_key;
 
   useEffect(() => {
     loadApiKeys();
@@ -333,6 +336,35 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleCompleteOnboarding = async () => {
+    if (!requiredKeysReady) {
+      const message = 'Google Places et Serper.dev sont requis avant de terminer la configuration.';
+      if (Platform.OS === 'web') {
+        window.alert(message);
+      } else {
+        Alert.alert('Configuration incomplete', message);
+      }
+      return;
+    }
+
+    try {
+      const token = await AsyncStorage.getItem('token');
+      await axios.post(
+        `${API_URL}/api/user/complete-onboarding`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      router.replace('/home');
+    } catch (error) {
+      console.error('Error completing onboarding:', error);
+      if (Platform.OS === 'web') {
+        window.alert('Impossible de finaliser l activation pour le moment.');
+      } else {
+        Alert.alert('Erreur', 'Impossible de finaliser l activation pour le moment.');
+      }
+    }
+  };
+
   const renderApiSection = (
     apiType: 'google' | 'serper' | 'pappers',
     keyName: 'google_api_key' | 'serper_api_key' | 'pappers_api_key',
@@ -473,6 +505,64 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
+        {onboardingMode && (
+          <View style={styles.onboardingHero}>
+            <View style={styles.onboardingHeroHeader}>
+              <Ionicons name="shield-checkmark" size={24} color="#4F46E5" />
+              <Text style={styles.onboardingHeroTitle}>Premiere configuration securisee</Text>
+            </View>
+            <Text style={styles.onboardingHeroText}>
+              Chaque compte doit renseigner ses propres cles API. Aucune cle personnelle n est partagee avec les autres utilisateurs.
+            </Text>
+            <View style={styles.onboardingSteps}>
+              <Text style={styles.onboardingStep}>1. Ouvre Google Places et recupere ta cle Google.</Text>
+              <Text style={styles.onboardingStep}>2. Ouvre Serper.dev et recupere ta cle Serper.</Text>
+              <Text style={styles.onboardingStep}>3. Pappers est optionnelle, utile pour le scan Pappers.</Text>
+              <Text style={styles.onboardingStep}>4. Enregistre les cles puis termine l activation.</Text>
+            </View>
+            <View style={styles.onboardingQuickLinks}>
+              <TouchableOpacity
+                style={styles.onboardingQuickBtn}
+                onPress={() => Linking.openURL(API_INFO.google.link)}
+              >
+                <Ionicons name="logo-google" size={16} color="#4F46E5" />
+                <Text style={styles.onboardingQuickBtnText}>Google</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.onboardingQuickBtn}
+                onPress={() => Linking.openURL(API_INFO.serper.link)}
+              >
+                <Ionicons name="search" size={16} color="#4F46E5" />
+                <Text style={styles.onboardingQuickBtnText}>Serper</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.onboardingQuickBtn}
+                onPress={() => Linking.openURL(API_INFO.pappers.link)}
+              >
+                <Ionicons name="document-text" size={16} color="#4F46E5" />
+                <Text style={styles.onboardingQuickBtnText}>Pappers</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.onboardingFinishBtn,
+                !requiredKeysReady && styles.onboardingFinishBtnDisabled,
+              ]}
+              onPress={handleCompleteOnboarding}
+              disabled={!requiredKeysReady}
+            >
+              <Ionicons
+                name={requiredKeysReady ? 'checkmark-circle' : 'lock-closed'}
+                size={18}
+                color="#FFF"
+              />
+              <Text style={styles.onboardingFinishBtnText}>
+                {requiredKeysReady ? 'Terminer l activation' : 'Google + Serper requis'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Info Banner */}
         <View style={styles.infoBanner}>
           <Ionicons name="information-circle" size={24} color="#6366F1" />
@@ -1404,5 +1494,72 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#9CA3AF',
     paddingVertical: 20,
+  },
+  onboardingHero: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 18,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  onboardingHeroHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  onboardingHeroTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#312E81',
+  },
+  onboardingHeroText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#4338CA',
+  },
+  onboardingSteps: {
+    gap: 6,
+  },
+  onboardingStep: {
+    fontSize: 13,
+    color: '#3730A3',
+  },
+  onboardingQuickLinks: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  onboardingQuickBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  onboardingQuickBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  onboardingFinishBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#4F46E5',
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  onboardingFinishBtnDisabled: {
+    backgroundColor: '#A5B4FC',
+  },
+  onboardingFinishBtnText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFF',
   },
 });

@@ -72,6 +72,12 @@ export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const isCompactScreen = width < 1100;
   const [userName, setUserName] = useState('');
+  const [showApiOnboarding, setShowApiOnboarding] = useState(false);
+  const [apiKeysStatus, setApiKeysStatus] = useState({
+    hasGoogleKey: false,
+    hasSerperKey: false,
+    hasPappersKey: false,
+  });
   const [showNotifications, setShowNotifications] = useState(false);
   const [copiedPhoneKey, setCopiedPhoneKey] = useState<string | null>(null);
   const [pulseAnim] = useState(new Animated.Value(1));
@@ -130,6 +136,25 @@ export default function HomeScreen() {
     }
     const name = await AsyncStorage.getItem('userName');
     setUserName(name || 'Utilisateur');
+
+    try {
+      const keysResponse = await axios.get(`${API_URL}/api/user/api-keys`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const hasGoogle = keysResponse.data.has_google_key || false;
+      const hasSerper = keysResponse.data.has_serper_key || false;
+      const hasPappers = keysResponse.data.has_pappers_key || false;
+
+      setApiKeysStatus({
+        hasGoogleKey: hasGoogle,
+        hasSerperKey: hasSerper,
+        hasPappersKey: hasPappers,
+      });
+      setShowApiOnboarding(!hasGoogle || !hasSerper);
+    } catch (error) {
+      console.error('Error checking API keys:', error);
+      setShowApiOnboarding(false);
+    }
   };
 
   const loadCockpitStats = async () => {
@@ -919,6 +944,93 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={showApiOnboarding}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View style={styles.onboardingOverlay}>
+          <View style={styles.onboardingModal}>
+            <Ionicons name="key" size={44} color="#F59E0B" />
+            <Text style={styles.onboardingTitle}>Configuration requise</Text>
+            <Text style={styles.onboardingSubtitle}>
+              Chaque utilisateur doit configurer ses propres clés API avant de lancer des scans.
+            </Text>
+
+            <View style={styles.onboardingChecklist}>
+              <View style={styles.onboardingCheckItem}>
+                <Ionicons
+                  name={apiKeysStatus.hasGoogleKey ? 'checkmark-circle' : 'close-circle'}
+                  size={22}
+                  color={apiKeysStatus.hasGoogleKey ? '#10B981' : '#EF4444'}
+                />
+                <View style={styles.onboardingCheckText}>
+                  <Text style={styles.onboardingCheckLabel}>Google Places</Text>
+                  <Text style={styles.onboardingCheckStatus}>
+                    {apiKeysStatus.hasGoogleKey ? 'Configurée' : 'Requise pour les scans Internet'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.onboardingCheckItem}>
+                <Ionicons
+                  name={apiKeysStatus.hasSerperKey ? 'checkmark-circle' : 'close-circle'}
+                  size={22}
+                  color={apiKeysStatus.hasSerperKey ? '#10B981' : '#EF4444'}
+                />
+                <View style={styles.onboardingCheckText}>
+                  <Text style={styles.onboardingCheckLabel}>Serper.dev</Text>
+                  <Text style={styles.onboardingCheckStatus}>
+                    {apiKeysStatus.hasSerperKey ? 'Configurée' : 'Requise pour la recherche web et PagesJaunes'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.onboardingCheckItem}>
+                <Ionicons
+                  name={apiKeysStatus.hasPappersKey ? 'checkmark-circle' : 'information-circle'}
+                  size={22}
+                  color={apiKeysStatus.hasPappersKey ? '#10B981' : '#F59E0B'}
+                />
+                <View style={styles.onboardingCheckText}>
+                  <Text style={styles.onboardingCheckLabel}>Pappers</Text>
+                  <Text style={styles.onboardingCheckStatus}>
+                    {apiKeysStatus.hasPappersKey ? 'Configurée' : 'Optionnelle pour le scan Pappers'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <Text style={styles.onboardingInfoText}>
+              Tes clés restent privées sur ton compte. Un utilisateur sans clés personnelles ne pourra pas scanner.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.onboardingPrimaryBtn}
+              onPress={() => {
+                setShowApiOnboarding(false);
+                router.push('/settings?onboarding=1');
+              }}
+            >
+              <Ionicons name="settings" size={18} color="#FFF" />
+              <Text style={styles.onboardingPrimaryBtnText}>Configurer mes clés</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.onboardingSecondaryBtn}
+              onPress={async () => {
+                await AsyncStorage.clear();
+                router.replace('/login');
+              }}
+            >
+              <Ionicons name="log-out-outline" size={18} color="#475569" />
+              <Text style={styles.onboardingSecondaryBtnText}>Se déconnecter</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1469,6 +1581,89 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#374151',
     textAlign: 'center',
+  },
+  onboardingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  onboardingModal: {
+    width: '100%',
+    maxWidth: 560,
+    backgroundColor: '#FFF',
+    borderRadius: 24,
+    padding: 24,
+    gap: 16,
+  },
+  onboardingTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  onboardingSubtitle: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: '#475569',
+  },
+  onboardingChecklist: {
+    gap: 12,
+  },
+  onboardingCheckItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 14,
+  },
+  onboardingCheckText: {
+    flex: 1,
+    gap: 2,
+  },
+  onboardingCheckLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  onboardingCheckStatus: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  onboardingInfoText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#475569',
+  },
+  onboardingPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#4F46E5',
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  onboardingPrimaryBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFF',
+  },
+  onboardingSecondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 14,
+    paddingVertical: 12,
+  },
+  onboardingSecondaryBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#475569',
   },
   // Scan progress badge
   scanningBadge: {
