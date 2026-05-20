@@ -1,0 +1,7 @@
+FROM caddy:2-alpine
+
+COPY Caddyfile.hosted /etc/caddy/Caddyfile
+COPY frontend/dist_hosted /srv
+
+EXPOSE 80
+EXPOSE 443
