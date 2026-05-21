@@ -1809,7 +1809,7 @@ COLONNE DROITE:
               data-testid="move-to-visite-btn"
             >
               <Ionicons name="walk-outline" size={18} color="#F59E0B" />
-              <Text style={styles.moveToVisiteBtnText}>Numéro injoignable -> Visite terrain</Text>
+              <Text style={styles.moveToVisiteBtnText}>Numéro injoignable → Visite terrain</Text>
             </TouchableOpacity>
           )}
           

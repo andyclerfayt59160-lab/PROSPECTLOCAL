@@ -18,7 +18,7 @@ async def track_api_usage(
     user_id: str, 
     api_type: str, 
     endpoint: str, 
-    credits: int = 1, 
+    credits: float = 1.0, 
     success: bool = True, 
     error_msg: str = None
 ):

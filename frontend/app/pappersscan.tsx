@@ -42,6 +42,7 @@ interface City {
   codesPostaux?: string[];
   postal_codes?: string[];
   department?: string;
+  department_code?: string;
 }
 
 interface ScanHistoryItem {
@@ -49,9 +50,11 @@ interface ScanHistoryItem {
   query_label?: string;
   location_label?: string;
   selected_cities?: City[];
+  domains?: string[];
   radius_km?: number;
   max_age_days?: number;
   scan_type?: string;
+  search_mode?: 'radius' | 'multi' | 'department';
   activity_id?: string;
   created_at?: string;
   result_count?: number;
@@ -65,6 +68,9 @@ interface ScanHistoryItem {
   postal_codes_scanned?: number;
   postal_codes_searched?: number;
   postal_codes_available?: number;
+  geo_unit_label?: string;
+  geo_units_scanned?: number;
+  geo_units_available?: number;
   new_results_count?: number;
   reused_results_count?: number;
   scan_diagnostics?: {
@@ -75,6 +81,7 @@ interface ScanHistoryItem {
     skipped_invalid_date_count?: number;
     skipped_future_date_count?: number;
     skipped_batch_duplicate_count?: number;
+    pappers_credits_used?: number;
   };
 }
 
@@ -86,6 +93,9 @@ interface PappersScanEstimate {
   naf_codes_scanned: number;
   postal_codes_available: number;
   postal_codes_scanned: number;
+  geo_unit_label?: string;
+  geo_units_available?: number;
+  geo_units_scanned?: number;
   location_label?: string;
   pappers_budget?: {
     monthly_budget: number;
@@ -97,7 +107,25 @@ interface PappersScanEstimate {
   };
 }
 
-const getHistoryCoverageLabel = (scan: ScanHistoryItem): string => {
+const formatCreditValue = (value?: number) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '0';
+  }
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+};
+
+const getScanGeoUnitLabel = (scan: ScanHistoryItem) => scan.geo_unit_label || 'codes postaux';
+
+const getScanGeoUnitCounts = (scan: ScanHistoryItem) => {
+  const scanned = scan.geo_units_scanned ?? scan.postal_codes_scanned ?? scan.postal_codes_searched ?? 0;
+  const available = scan.geo_units_available ?? scan.postal_codes_available ?? scan.postal_codes_searched ?? scanned;
+  return {
+    scanned,
+    available: Math.max(available, scanned),
+  };
+};
+
+const _legacyGetHistoryCoverageLabel = (scan: ScanHistoryItem): string => {
   const scannedNaf = scan.naf_codes_scanned ?? scan.naf_codes_searched ?? 0;
   const availableNaf = scan.naf_codes_available ?? scannedNaf;
   const scannedPostal = scan.postal_codes_scanned ?? scan.postal_codes_searched ?? 0;
@@ -108,6 +136,19 @@ const getHistoryCoverageLabel = (scan: ScanHistoryItem): string => {
   }
 
   return `${scannedNaf}/${Math.max(availableNaf, scannedNaf)} NAF • ${scannedPostal}/${Math.max(availablePostal, scannedPostal)} codes postaux`;
+};
+
+const getHistoryCoverageLabel = (scan: ScanHistoryItem): string => {
+  const scannedNaf = scan.naf_codes_scanned ?? scan.naf_codes_searched ?? 0;
+  const availableNaf = scan.naf_codes_available ?? scannedNaf;
+  const geoUnitLabel = getScanGeoUnitLabel(scan);
+  const geoCounts = getScanGeoUnitCounts(scan);
+
+  if (!scannedNaf && !geoCounts.scanned) {
+    return '';
+  }
+
+  return `${scannedNaf}/${Math.max(availableNaf, scannedNaf)} NAF - ${geoCounts.scanned}/${geoCounts.available} ${geoUnitLabel}`;
 };
 
 const getHistoryDiagnosticLabel = (scan: ScanHistoryItem): string => {
@@ -151,7 +192,7 @@ const getHistoryEstimatedYieldPercent = (scan: ScanHistoryItem): number => {
   return Math.round((results / requests) * 1000) / 10;
 };
 
-const getHistoryCostLabel = (scan: ScanHistoryItem): string => {
+const _legacyGetHistoryCostLabel = (scan: ScanHistoryItem): string => {
   const requests = getHistoryRequestCount(scan);
   if (!requests) {
     return 'CoÃ»t API non mesure';
@@ -159,7 +200,7 @@ const getHistoryCostLabel = (scan: ScanHistoryItem): string => {
   return `${requests} credits Pappers consommes`;
 };
 
-const getHistoryOutcomeSummary = (scan: ScanHistoryItem): string => {
+const _legacyGetHistoryOutcomeSummary = (scan: ScanHistoryItem): string => {
   const requests = getHistoryRequestCount(scan);
   const rawCompanies = getHistoryRawCompanyCount(scan);
   const results = getHistoryResultCount(scan);
@@ -190,7 +231,7 @@ const getHistoryOutcomeSummary = (scan: ScanHistoryItem): string => {
   return 'Scan peu rentable : de la matiere a ete vue, mais rien d exploitable n a survecu au filtrage.';
 };
 
-const getHistoryOutcomeTone = (scan: ScanHistoryItem): { label: string; color: string; backgroundColor: string } => {
+const _legacyGetHistoryOutcomeTone = (scan: ScanHistoryItem): { label: string; color: string; backgroundColor: string } => {
   const requests = getHistoryRequestCount(scan);
   const results = getHistoryResultCount(scan);
   const rawCompanies = getHistoryRawCompanyCount(scan);
@@ -237,6 +278,96 @@ const getHistoryOutcomeTone = (scan: ScanHistoryItem): { label: string; color: s
   };
 };
 
+const getHistoryCostLabel = (scan: ScanHistoryItem): string => {
+  const pappersCreditsUsed = scan.scan_diagnostics?.pappers_credits_used ?? 0;
+  if (pappersCreditsUsed > 0) {
+    return `${formatCreditValue(pappersCreditsUsed)} credits Pappers consommes`;
+  }
+
+  const requests = getHistoryRequestCount(scan);
+  if (!requests) {
+    return 'Cout API non mesure';
+  }
+  return `${requests} appels Pappers consommes`;
+};
+
+const getHistoryOutcomeSummary = (scan: ScanHistoryItem): string => {
+  const requests = getHistoryRequestCount(scan);
+  const rawCompanies = getHistoryRawCompanyCount(scan);
+  const results = getHistoryResultCount(scan);
+  const tooOld = getHistoryTooOldCount(scan);
+  const geoCounts = getScanGeoUnitCounts(scan);
+  const geoUnitLabel = getScanGeoUnitLabel(scan);
+
+  if (!requests) {
+    return 'Scan incomplet ou interrompu avant la collecte.';
+  }
+
+  if (results > 0) {
+    return `${results} resultat(s) final(aux) pour ${requests} appels, soit ~${getHistoryEstimatedYieldPercent(scan)}% de rendement brut.`;
+  }
+
+  if (rawCompanies > 0 && tooOld >= Math.max(1, Math.floor(rawCompanies * 0.8))) {
+    return 'Marche trouve, mais fenetre trop courte : la quasi-totalite des societes remontees etaient trop anciennes.';
+  }
+
+  if (geoCounts.available >= 6 && geoCounts.scanned < geoCounts.available) {
+    return `Couverture incomplete sur ce scan : seulement ${geoCounts.scanned}/${geoCounts.available} ${geoUnitLabel} ont ete explores.`;
+  }
+
+  if (rawCompanies === 0) {
+    return 'Aucune societe brute remontee sur cette combinaison zone + activites + periode.';
+  }
+
+  return 'Scan peu rentable : de la matiere a ete vue, mais rien d exploitable n a survecu au filtrage.';
+};
+
+const getHistoryOutcomeTone = (scan: ScanHistoryItem): { label: string; color: string; backgroundColor: string } => {
+  const requests = getHistoryRequestCount(scan);
+  const results = getHistoryResultCount(scan);
+  const rawCompanies = getHistoryRawCompanyCount(scan);
+  const tooOld = getHistoryTooOldCount(scan);
+  const geoCounts = getScanGeoUnitCounts(scan);
+
+  if (!requests) {
+    return {
+      label: 'Incomplet',
+      color: '#92400E',
+      backgroundColor: '#FEF3C7',
+    };
+  }
+
+  if (results > 0) {
+    return {
+      label: 'Rentable',
+      color: '#166534',
+      backgroundColor: '#DCFCE7',
+    };
+  }
+
+  if (rawCompanies > 0 && tooOld >= Math.max(1, Math.floor(rawCompanies * 0.8))) {
+    return {
+      label: 'Fenetre trop courte',
+      color: '#1D4ED8',
+      backgroundColor: '#DBEAFE',
+    };
+  }
+
+  if (geoCounts.available >= 6 && geoCounts.scanned < geoCounts.available) {
+    return {
+      label: 'Couverture incomplete',
+      color: '#B45309',
+      backgroundColor: '#FEF3C7',
+    };
+  }
+
+  return {
+    label: 'Peu rentable',
+    color: '#991B1B',
+    backgroundColor: '#FEE2E2',
+  };
+};
+
 export default function PappersScanScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -246,7 +377,7 @@ export default function PappersScanScreen() {
   const [citySearch, setCitySearch] = useState('');
   const [citySuggestions, setCitySuggestions] = useState<City[]>([]);
   const [selectedCities, setSelectedCities] = useState<City[]>([]);
-  const [searchMode, setSearchMode] = useState<'radius' | 'multi'>('radius');
+  const [searchMode, setSearchMode] = useState<'radius' | 'multi' | 'department'>('radius');
   const [radius, setRadius] = useState(20);
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -274,6 +405,30 @@ export default function PappersScanScreen() {
 
   const getCityDisplayName = (city: City) => city.name || city.nom || city.code;
   const getCityPostalCodes = (city: City) => city.codesPostaux || city.postal_codes || [];
+  const getCityDepartmentCode = (city: City) => city.department_code || '';
+  const getCityChipLabel = (city: City) => (
+    searchMode === 'department' && getCityDepartmentCode(city)
+      ? `${getCityDisplayName(city)} (${getCityDepartmentCode(city)})`
+      : getCityDisplayName(city)
+  );
+  const getSelectedLocationSummary = () => {
+    if (selectedCities.length === 0) {
+      return '';
+    }
+
+    if (searchMode === 'radius') {
+      return `${radius}km autour de ${getCityDisplayName(selectedCities[0])}`;
+    }
+
+    if (searchMode === 'department') {
+      return selectedCities.map(getCityChipLabel).join(', ');
+    }
+
+    return `${selectedCities.length} ville(s) : ${selectedCities.map(getCityDisplayName).join(', ')}`;
+  };
+  const getEstimatedGeoUnitLabel = () => (
+    scanEstimate?.geo_unit_label || (searchMode === 'department' ? 'departements' : 'codes postaux')
+  );
   const hasPendingTypedCity = citySearch.trim().length >= 2 && citySuggestions.length > 0;
   const selectedDateFilter = DATE_FILTERS.find(f => f.id === creationDateFilter) || DATE_FILTERS[3];
 
@@ -284,6 +439,8 @@ export default function PappersScanScreen() {
           code: city.code || `${city.name || city.nom || 'city'}-${index}`,
           postal_codes: city.postal_codes || city.codesPostaux || [],
           codesPostaux: city.codesPostaux || city.postal_codes || [],
+          department: city.department || '',
+          department_code: city.department_code || '',
         }))
       : [{
           name: (scan.location_label || '').split('+')[0].trim() || 'Ville',
@@ -300,7 +457,13 @@ export default function PappersScanScreen() {
     else if (days <= 365) nextDateFilter = '12_months';
 
     setSelectedDomains(Array.isArray(scan.domains) ? scan.domains : []);
-    setSearchMode(scan.search_mode === 'multi' ? 'multi' : 'radius');
+    setSearchMode(
+      scan.search_mode === 'multi'
+        ? 'multi'
+        : scan.search_mode === 'department'
+          ? 'department'
+          : 'radius'
+    );
     setRadius(scan.search_mode === 'radius' ? (scan.radius_km || 20) : 20);
     setCreationDateFilter(nextDateFilter);
     setSelectedCities(historyCities);
@@ -364,7 +527,7 @@ export default function PappersScanScreen() {
       }
     }
 
-    if (params.editSearchMode === 'multi' || params.editSearchMode === 'radius') {
+    if (params.editSearchMode === 'multi' || params.editSearchMode === 'radius' || params.editSearchMode === 'department') {
       setSearchMode(params.editSearchMode);
     }
 
@@ -384,6 +547,8 @@ export default function PappersScanScreen() {
           name: cleanLocation,
           code: '',
           postal_codes: [],
+          department: '',
+          department_code: '',
         };
         setSelectedCities([editedCity]);
         setCitySearch(cleanLocation);
@@ -419,6 +584,8 @@ export default function PappersScanScreen() {
           name: getCityDisplayName(c),
           code: c.code,
           postal_codes: getCityPostalCodes(c),
+          department: c.department || '',
+          department_code: getCityDepartmentCode(c),
         }));
 
         const response = await axios.post(
@@ -595,10 +762,31 @@ export default function PappersScanScreen() {
     });
   };
 
-  const addCity = (city: City) => {
+  const _legacyAddCity = (city: City) => {
     if (!selectedCities.find(c => c.code === city.code)) {
       setSelectedCities([...selectedCities, city]);
       showToast(`${getCityDisplayName(city)} ajoutée au scan`, 'success');
+    }
+    setCitySearch('');
+    setCitySuggestions([]);
+  };
+
+  const addCity = (city: City) => {
+    if (searchMode === 'department' && getCityDepartmentCode(city)) {
+      const alreadySelectedDepartment = selectedCities.find(
+        c => getCityDepartmentCode(c) && getCityDepartmentCode(c) === getCityDepartmentCode(city)
+      );
+      if (alreadySelectedDepartment) {
+        showToast(`Le departement ${getCityDepartmentCode(city)} est deja dans la selection.`, 'info');
+        setCitySearch('');
+        setCitySuggestions([]);
+        return;
+      }
+    }
+
+    if (!selectedCities.find(c => c.code === city.code)) {
+      setSelectedCities([...selectedCities, city]);
+      showToast(`${getCityDisplayName(city)} ajoutee au scan`, 'success');
     }
     setCitySearch('');
     setCitySuggestions([]);
@@ -631,6 +819,7 @@ export default function PappersScanScreen() {
   const calculateFallbackEstimatedCalls = () => {
     const totalActivities = getSelectedCount();
     const uniquePostalCodes = new Set<string>();
+    const uniqueDepartments = new Set<string>();
 
     selectedCities.forEach((city) => {
       getCityPostalCodes(city).forEach((postalCode) => {
@@ -638,16 +827,27 @@ export default function PappersScanScreen() {
           uniquePostalCodes.add(postalCode);
         }
       });
+      if (getCityDepartmentCode(city)) {
+        uniqueDepartments.add(getCityDepartmentCode(city));
+      }
     });
 
-    const postalCodeCount = uniquePostalCodes.size > 0
-      ? uniquePostalCodes.size
-      : searchMode === 'radius'
-        ? Math.max(1, Math.ceil(radius / 2))
-        : Math.max(1, selectedCities.length);
+    const geoTargetCount = searchMode === 'department'
+      ? Math.max(1, uniqueDepartments.size || selectedCities.length)
+      : uniquePostalCodes.size > 0
+        ? uniquePostalCodes.size
+        : searchMode === 'radius'
+          ? Math.max(1, Math.ceil(radius / 2))
+          : Math.max(1, selectedCities.length);
 
-    const periodFactor = selectedDateFilter.days <= 30 ? 0.8 : selectedDateFilter.days <= 180 ? 1 : 1.2;
-    return Math.ceil(totalActivities * postalCodeCount * periodFactor);
+    const periodFactor = searchMode === 'department'
+      ? (selectedDateFilter.days <= 30 ? 2 : selectedDateFilter.days <= 180 ? 3 : 4)
+      : selectedDateFilter.days <= 30
+        ? 0.8
+        : selectedDateFilter.days <= 180
+          ? 1
+          : 1.2;
+    return Math.ceil(totalActivities * geoTargetCount * periodFactor);
   };
 
   const getEffectiveEstimatedCalls = () => scanEstimate?.estimated_requests ?? calculateFallbackEstimatedCalls();
@@ -699,15 +899,17 @@ export default function PappersScanScreen() {
     const nafRatio = scanEstimate.naf_codes_scanned > 0
       ? scanEstimate.naf_codes_scanned / Math.max(scanEstimate.naf_codes_available, scanEstimate.naf_codes_scanned)
       : 0;
-    const postalRatio = scanEstimate.postal_codes_scanned > 0
-      ? scanEstimate.postal_codes_scanned / Math.max(scanEstimate.postal_codes_available, scanEstimate.postal_codes_scanned)
+    const geoScanned = scanEstimate.geo_units_scanned ?? scanEstimate.postal_codes_scanned;
+    const geoAvailable = scanEstimate.geo_units_available ?? scanEstimate.postal_codes_available;
+    const geoRatio = geoScanned && geoScanned > 0
+      ? geoScanned / Math.max(geoAvailable ?? geoScanned, geoScanned)
       : 0;
 
-    if (nafRatio > 0 && postalRatio > 0) {
-      return (nafRatio + postalRatio) / 2;
+    if (nafRatio > 0 && geoRatio > 0) {
+      return (nafRatio + geoRatio) / 2;
     }
 
-    return Math.max(nafRatio, postalRatio);
+    return Math.max(nafRatio, geoRatio);
   };
 
   const getEstimatePilot = () => {
@@ -785,7 +987,7 @@ export default function PappersScanScreen() {
     };
   };
 
-  const handleStartScan = () => {
+  const _legacyHandleStartScan = () => {
     if (hasPendingTypedCity && selectedCities.length === 0) {
       addCity(citySuggestions[0]);
       showToast("Ville détectée automatiquement. Clique une seconde fois pour lancer le scan.", 'info');
@@ -819,7 +1021,7 @@ export default function PappersScanScreen() {
     }
   };
 
-  const executeScan = async () => {
+  const _legacyExecuteScan = async () => {
     setShowWarningModal(false);
     setScanning(true);
     setScanProgress({ current: 1, total: 3, activity: 'Preparation du scan...' });
@@ -941,6 +1143,185 @@ export default function PappersScanScreen() {
     }
   };
 
+  const handleStartScan = () => {
+    if (hasPendingTypedCity && selectedCities.length === 0 && citySuggestions.length > 0) {
+      addCity(citySuggestions[0]);
+      showToast('Ville detectee automatiquement. Clique une seconde fois pour lancer le scan.', 'info');
+      return;
+    }
+
+    if (searchMode === 'radius' && selectedCities.length === 0) {
+      showToast('Veuillez selectionner la ville centre du rayon.', 'error');
+      return;
+    }
+
+    if (searchMode === 'multi' && selectedCities.length === 0) {
+      showToast('Veuillez selectionner au moins une ville.', 'error');
+      return;
+    }
+
+    if (searchMode === 'department' && selectedCities.length === 0) {
+      showToast('Veuillez selectionner au moins une ville de reference pour determiner le departement.', 'error');
+      return;
+    }
+
+    if (selectedDomains.length === 0) {
+      showToast('Veuillez selectionner au moins un domaine.', 'error');
+      return;
+    }
+
+    const estimatedCredits = Math.ceil(scanEstimate?.estimated_pappers_credits ?? getEffectiveEstimatedCalls());
+    setEstimatedCalls(estimatedCredits);
+
+    if (scanEstimate?.pappers_budget?.will_exceed_budget) {
+      showToast('Credits Pappers insuffisants pour couvrir tout le scan demande.', 'error');
+      return;
+    }
+
+    if (estimatedCredits >= 120 || searchMode === 'department') {
+      setShowWarningModal(true);
+      return;
+    }
+
+    executeScan();
+  };
+
+  const executeScan = async () => {
+    setShowWarningModal(false);
+    setScanning(true);
+    setScanProgress({ current: 1, total: 3, activity: 'Preparation du scan...' });
+
+    try {
+      const token = await AsyncStorage.getItem('token');
+      if (!token) {
+        showToast('Session expiree. Reconnecte-toi pour lancer un scan.', 'error');
+        router.replace('/login');
+        return;
+      }
+
+      setScanProgress({ current: 2, total: 3, activity: 'Verification du budget puis envoi a Pappers...' });
+
+      const estimatedCredits = Math.ceil(scanEstimate?.estimated_pappers_credits ?? getEffectiveEstimatedCalls());
+
+      try {
+        const creditCheckResponse = await axios.get(
+          `${API_URL}/api/api-usage/check-before-scan`,
+          {
+            params: {
+              scan_type: 'pappers',
+              estimated_pappers_credits: estimatedCredits,
+            },
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 15000,
+          }
+        );
+
+        const blockers = creditCheckResponse.data?.blockers || [];
+        const warnings = creditCheckResponse.data?.warnings || [];
+
+        if (blockers.length > 0) {
+          showToast(blockers.map((item: any) => item.message).join(' | '), 'error');
+          return;
+        }
+
+        if (warnings.length > 0) {
+          showToast(warnings.map((item: any) => item.message).join(' | '), 'warning');
+        }
+      } catch (creditError) {
+        console.log('Could not check Pappers credits before scan:', creditError);
+      }
+
+      const cities = selectedCities.map((city) => ({
+        name: getCityDisplayName(city),
+        code: city.code,
+        postal_codes: getCityPostalCodes(city),
+        department: city.department || '',
+        department_code: getCityDepartmentCode(city),
+      }));
+
+      const dateFilterDays = selectedDateFilter.days || 365;
+      const scanLocationLabel = getSelectedLocationSummary();
+      showToast(`Scan Pappers lance sur ${scanLocationLabel}. La date de creation restera limitee a ${selectedDateFilter.label}.`, 'info');
+
+      const response = await axios.post(
+        `${API_URL}/api/pappers-scan`,
+        {
+          domains: selectedDomains,
+          cities,
+          search_mode: searchMode,
+          radius_km: searchMode === 'radius' ? radius : 0,
+          max_age_days: dateFilterDays,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 300000,
+        }
+      );
+
+      setScanProgress({ current: 3, total: 3, activity: 'Scan termine.' });
+      loadRecentScans();
+
+      const responseGeoLabel = response.data.geo_unit_label || getEstimatedGeoUnitLabel();
+      const responseGeoScanned = response.data.geo_units_scanned ?? response.data.postal_codes_scanned ?? 0;
+      const responseGeoAvailable = response.data.geo_units_available ?? response.data.postal_codes_available ?? responseGeoScanned;
+      const responseNafScanned = response.data.naf_codes_scanned || 0;
+      const responseNafAvailable = response.data.naf_codes_available || responseNafScanned;
+      const observedCredits = response.data.scan_diagnostics?.pappers_credits_used ?? 0;
+      const coverageHint = responseNafScanned
+        ? ` Couverture: ${responseNafScanned}/${Math.max(responseNafAvailable, responseNafScanned)} NAF x ${responseGeoScanned}/${Math.max(responseGeoAvailable, responseGeoScanned)} ${responseGeoLabel}.`
+        : '';
+      const costHint = observedCredits > 0
+        ? ` Cout observe: ${formatCreditValue(observedCredits)} credits Pappers.`
+        : '';
+      const zeroResultHint = response.data.total_found === 0 && dateFilterDays <= 30
+        ? ` Fenetre ${selectedDateFilter.label} tres stricte: le marche peut exister mais etre plus ancien.`
+        : '';
+
+      showToast(
+        `${response.data.total_found} entreprises, ${response.data.visite_count} terrain, ${response.data.lead_count} joignables.${coverageHint}${costHint}${zeroResultHint}`,
+        response.data.total_found > 0 ? 'success' : 'warning'
+      );
+
+      router.push({
+        pathname: '/results',
+        params: {
+          scanId: response.data.scan_id,
+          source: 'pappers',
+          cityLabel: scanLocationLabel,
+          radiusKm: String(searchMode === 'radius' ? radius : 0),
+          maxAgeDays: String(dateFilterDays),
+          dateLabel: selectedDateFilter.label,
+          totalFound: String(response.data.total_found || 0),
+          visiteCount: String(response.data.visite_count || 0),
+          leadCount: String(response.data.lead_count || 0),
+          newResultsCount: String(response.data.new_results_count || 0),
+          reusedResultsCount: String(response.data.reused_results_count || 0),
+          rawCompaniesReceived: String(response.data.scan_diagnostics?.raw_companies_received || 0),
+          requestsAttempted: String(response.data.scan_diagnostics?.requests_attempted || 0),
+          skippedTooOldCount: String(response.data.scan_diagnostics?.skipped_too_old_count || 0),
+          nafScanned: String(responseNafScanned),
+          nafAvailable: String(responseNafAvailable),
+          postalScanned: String(response.data.postal_codes_scanned || 0),
+          postalAvailable: String(response.data.postal_codes_available || response.data.postal_codes_scanned || 0),
+          geoUnitLabel: String(responseGeoLabel),
+          geoUnitsScanned: String(responseGeoScanned),
+          geoUnitsAvailable: String(responseGeoAvailable),
+          pappersCreditsUsed: String(observedCredits),
+        },
+      });
+    } catch (error: any) {
+      console.error('Scan error:', error);
+      const detail = error.response?.data?.detail;
+      const parsedMessage = Array.isArray(detail)
+        ? detail.map((item: any) => item.msg || item.message || JSON.stringify(item)).join('\n')
+        : detail || error.message || 'Erreur lors du scan';
+      setScanProgress({ current: 0, total: 0, activity: '' });
+      showToast(`Echec du scan: ${parsedMessage}`, 'error');
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const getSelectedCount = () => {
     if (selectedDomains.includes('ALL')) return 77;
     let count = 0;
@@ -975,7 +1356,7 @@ export default function PappersScanScreen() {
         <View style={styles.infoBanner}>
           <Ionicons name="information-circle" size={22} color="#1565C0" />
           <Text style={styles.infoBannerText}>
-            Détectez toutes les nouvelles entreprises créées il y a moins d'un an dans votre zone.
+            Détectez les entreprises créées sur la période choisie, sans perdre de couverture sur la zone demandée.
           </Text>
         </View>
 
@@ -1022,19 +1403,38 @@ export default function PappersScanScreen() {
                 Plusieurs villes
               </Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modeBtn, searchMode === 'department' && styles.modeBtnActive]}
+              onPress={() => setSearchMode('department')}
+            >
+              <Ionicons name="map" size={18} color={searchMode === 'department' ? '#FFF' : '#666'} />
+              <Text style={[styles.modeBtnText, searchMode === 'department' && styles.modeBtnTextActive]}>
+                Departement
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
         {/* City Selection */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            {searchMode === 'multi' ? `Villes (${selectedCities.length} sélectionnées)` : 'Ville'}
+            {searchMode === 'multi'
+              ? `Villes (${selectedCities.length} sélectionnées)`
+              : searchMode === 'department'
+                ? `Départements (${selectedCities.length} sélectionnés)`
+                : 'Ville centre'}
           </Text>
           <View style={styles.cityInputContainer}>
             <Ionicons name="location" size={20} color="#666" />
             <TextInput
               style={styles.cityInput}
-              placeholder={searchMode === 'multi' ? "Ajouter une ville..." : "Rechercher une ville..."}
+              placeholder={
+                searchMode === 'multi'
+                  ? 'Ajouter une ville...'
+                  : searchMode === 'department'
+                    ? 'Ajouter une ville de référence du département...'
+                    : 'Rechercher une ville...'
+              }
               value={citySearch}
               onChangeText={setCitySearch}
               onSubmitEditing={() => {
@@ -1062,7 +1462,11 @@ export default function PappersScanScreen() {
                   onPress={() => addCity(city)}
                 >
                   <Text style={styles.suggestionText}>{getCityDisplayName(city)}</Text>
-                  <Text style={styles.suggestionCode}>{getCityPostalCodes(city)?.[0]}</Text>
+                  <Text style={styles.suggestionCode}>
+                    {searchMode === 'department'
+                      ? getCityDepartmentCode(city) || getCityPostalCodes(city)?.[0]
+                      : getCityPostalCodes(city)?.[0]}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -1073,7 +1477,7 @@ export default function PappersScanScreen() {
             <View style={styles.selectedCitiesContainer}>
               {selectedCities.map((city) => (
                 <View key={city.code} style={styles.selectedCityChip}>
-                  <Text style={styles.selectedCityText}>{getCityDisplayName(city)}</Text>
+                  <Text style={styles.selectedCityText}>{getCityChipLabel(city)}</Text>
                   <TouchableOpacity onPress={() => removeCity(city.code)}>
                     <Ionicons name="close-circle" size={18} color="#FFF" />
                   </TouchableOpacity>
@@ -1082,7 +1486,9 @@ export default function PappersScanScreen() {
             </View>
           )}
           <Text style={styles.helperText}>
-            Tape une ville puis clique sur une suggestion. Entrée ajoute automatiquement la première proposition.
+            {searchMode === 'department'
+              ? 'Ajoute une ville par département à couvrir. Le scan utilisera ensuite le département entier correspondant.'
+              : 'Tape une ville puis clique sur une suggestion. Entrée ajoute automatiquement la première proposition.'}
           </Text>
         </View>
 
@@ -1186,20 +1592,16 @@ export default function PappersScanScreen() {
             <View style={styles.estimationContent}>
               <Text style={styles.estimationTitle}>Estimation du scan</Text>
               <Text style={styles.estimationText}>
-                ~{calculateEstimatedCalls()} appels API • {getSelectedCount()} activités • {
-                  searchMode === 'radius' 
-                    ? `${radius}km autour de ${selectedCities[0]?.name || ''}` 
-                    : `${selectedCities.length} ville(s)`
-                }
+                ~{formatCreditValue(scanEstimate?.estimated_pappers_credits ?? calculateEstimatedCalls())} crédits Pappers • {getSelectedCount()} activités • {getSelectedLocationSummary()}
               </Text>
               {scanEstimate && (
                 <Text style={styles.estimationHint}>
-                  Couverture reelle prevue : {scanEstimate.naf_codes_scanned}/{Math.max(scanEstimate.naf_codes_available, scanEstimate.naf_codes_scanned)} NAF • {scanEstimate.postal_codes_scanned}/{Math.max(scanEstimate.postal_codes_available, scanEstimate.postal_codes_scanned)} codes postaux.
+                  Couverture réelle prévue : {scanEstimate.naf_codes_scanned}/{Math.max(scanEstimate.naf_codes_available, scanEstimate.naf_codes_scanned)} NAF • {(scanEstimate.geo_units_scanned ?? scanEstimate.postal_codes_scanned) || 0}/{Math.max((scanEstimate.geo_units_available ?? scanEstimate.postal_codes_available ?? scanEstimate.geo_units_scanned ?? scanEstimate.postal_codes_scanned) || 0, (scanEstimate.geo_units_scanned ?? scanEstimate.postal_codes_scanned) || 0)} {getEstimatedGeoUnitLabel()}.
                 </Text>
               )}
               {scanEstimate?.pappers_budget && (
                 <Text style={styles.estimationHint}>
-                  Credits Pappers restants ce mois-ci : {scanEstimate.pappers_budget.credits_remaining}/{scanEstimate.pappers_budget.monthly_budget} • apres ce scan : {scanEstimate.pappers_budget.remaining_after_scan}
+                  Crédits Pappers restants ce mois-ci : {formatCreditValue(scanEstimate.pappers_budget.credits_remaining)}/{formatCreditValue(scanEstimate.pappers_budget.monthly_budget)} • après ce scan : {formatCreditValue(scanEstimate.pappers_budget.remaining_after_scan)}
                 </Text>
               )}
               {scanEstimate && (
@@ -1228,7 +1630,7 @@ export default function PappersScanScreen() {
                   <View style={styles.estimationPilotMetrics}>
                     <View style={styles.estimationPilotMetric}>
                       <Text style={styles.estimationPilotMetricLabel}>Credits</Text>
-                      <Text style={styles.estimationPilotMetricValue}>{scanEstimate.estimated_pappers_credits}</Text>
+                      <Text style={styles.estimationPilotMetricValue}>{formatCreditValue(scanEstimate.estimated_pappers_credits)}</Text>
                     </View>
                     <View style={styles.estimationPilotMetric}>
                       <Text style={styles.estimationPilotMetricLabel}>Couverture</Text>
@@ -1236,7 +1638,7 @@ export default function PappersScanScreen() {
                     </View>
                     <View style={styles.estimationPilotMetric}>
                       <Text style={styles.estimationPilotMetricLabel}>Apres scan</Text>
-                      <Text style={styles.estimationPilotMetricValue}>{scanEstimate.pappers_budget?.remaining_after_scan ?? 0}</Text>
+                      <Text style={styles.estimationPilotMetricValue}>{formatCreditValue(scanEstimate.pappers_budget?.remaining_after_scan ?? 0)}</Text>
                     </View>
                   </View>
                 </View>
@@ -1504,21 +1906,17 @@ export default function PappersScanScreen() {
             <Ionicons name="warning" size={50} color="#FF9500" />
             <Text style={styles.warningTitle}>Scan volumineux</Text>
             <Text style={styles.warningText}>
-              Ce scan va effectuer environ <Text style={styles.warningHighlight}>{estimatedCalls} appels API</Text>.
+              Ce scan va consommer environ <Text style={styles.warningHighlight}>{formatCreditValue(estimatedCalls)} crédits Pappers</Text>.
             </Text>
             <Text style={styles.warningSubtext}>
-              Cela peut prendre plusieurs minutes et consommer vos credits API (Google, Serper, Pappers).
+              La recherche respectera strictement la période choisie sur la date de création, mais elle peut prendre plusieurs minutes selon la zone demandée.
             </Text>
             
             <View style={styles.warningDetails}>
               <Text style={styles.warningDetailItem}>{getSelectedCount()} activités</Text>
-              <Text style={styles.warningDetailItem}>Zone : {
-                searchMode === 'radius' 
-                  ? `${selectedCities[0]?.name || ''} + ${radius}km`
-                  : `${selectedCities.length} ville(s)`
-              }</Text>
-              <Text style={styles.warningDetailItem}>Duree estimee: {getEstimatedDurationMinutes()} min</Text>
-              <Text style={styles.warningDetailItem}>Periode: {selectedDateFilter.label}</Text>
+              <Text style={styles.warningDetailItem}>Zone : {getSelectedLocationSummary()}</Text>
+              <Text style={styles.warningDetailItem}>Durée estimée : {getEstimatedDurationMinutes()} min</Text>
+              <Text style={styles.warningDetailItem}>Période création : {selectedDateFilter.label}</Text>
             </View>
 
             <View style={styles.warningActions}>

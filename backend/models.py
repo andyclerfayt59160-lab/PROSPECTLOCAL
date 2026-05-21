@@ -476,7 +476,7 @@ class APIUsageLog(BaseModel):
     user_id: str
     api_type: APIType
     endpoint: str  # Ex: "recherche", "entreprise", "suggestions"
-    credits_used: int = 1
+    credits_used: float = 1.0
     success: bool = True
     error_message: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)

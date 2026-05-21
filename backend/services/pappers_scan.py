@@ -37,7 +37,7 @@ DOMAIN_NAF_CODES = {
     "RESTAURANT": ["5610A", "5610B", "5610C"],
     "BOULANGERIE": ["1071A", "1071B", "1071C", "1071D"],
     "COIFFEUR": ["9602A", "9602B"],
-    "BEAUTE": ["9604Z"],
+    "BEAUTE": ["9602A", "9602B", "9604Z"],
     "GARAGE": ["4520A", "4520B"],
     "IMMOBILIER": ["6831Z", "6832A", "6832B"],
     "COMPTABLE": ["6920Z"],
@@ -60,7 +60,21 @@ DOMAIN_NAF_CODES = {
     "AUTO": ["4511Z", "4519Z", "4520A", "4520B", "4531Z", "4532Z", "4540Z"],
     "SANTE": ["8610Z", "8621Z", "8622A", "8622B", "8622C", "8623Z", "8690A", "8690B", "8690C", "8690D", "8690E", "8690F"],
     "SERVICES": ["6910Z", "6920Z", "7010Z", "7021Z", "7022Z", "7111Z", "7112A", "7112B", "7120A", "7120B", "7311Z", "7312Z"],
+    "B2B": [
+        "6910Z", "6920Z",
+        "7010Z", "7021Z", "7022Z",
+        "7111Z", "7112A", "7112B", "7120A", "7120B",
+        "7311Z", "7312Z",
+        "8010Z",
+        "8121Z", "8122Z", "8129A", "8129B",
+    ],
     "TECH": ["6201Z", "6202A", "6202B", "6203Z", "6209Z", "6311Z", "6312Z"],
+    "AUTRE": [
+        "7420Z",
+        "8551Z",
+        "9311Z", "9312Z", "9313Z", "9319Z",
+        "9601A", "9601B",
+    ],
 }
 
 # Mapping code NAF -> libellé complet
@@ -339,48 +353,14 @@ def plan_pappers_scan_budget(
     """
     Compute the effective Pappers scan coverage budget.
 
-    The goal is to keep local prospecting scans wide enough to be useful while
-    preventing accidental API blow-ups on broad multi-domain searches.
+    The main Pappers scan now favors exhaustive coverage of the requested zone.
+    We keep this helper for compatibility with the existing estimate flow, but
+    it no longer truncates the requested NAF or geo coverage behind the user's
+    back. Cost protection is handled through estimation and explicit warnings.
     """
-    is_single_domain = selected_domains_count <= 1 and not has_explicit_naf_codes
-    is_specific_activity_scan = has_explicit_naf_codes
-    is_small_local_radius = search_mode == "radius" and radius_km <= 10
-    is_medium_local_radius = search_mode == "radius" and 10 < radius_km <= 20
-    is_extended_local_radius = search_mode == "radius" and 20 < radius_km <= 30
-    is_recent_window = max_age_days <= 90
-    is_mid_window = max_age_days <= 180
-
-    if is_small_local_radius and is_recent_window and (is_single_domain or is_specific_activity_scan):
-        max_naf_codes = min(total_naf_codes, 24)
-        max_postal_codes = min(total_postal_codes, max(18, min(30, 540 // max(1, max_naf_codes))))
-    elif is_small_local_radius and is_recent_window:
-        max_naf_codes = min(total_naf_codes, 18)
-        max_postal_codes = min(total_postal_codes, 18)
-    elif is_medium_local_radius and is_recent_window and (is_single_domain or is_specific_activity_scan):
-        max_naf_codes = min(total_naf_codes, 22)
-        max_postal_codes = min(total_postal_codes, max(18, min(24, 500 // max(1, max_naf_codes))))
-    elif is_medium_local_radius and is_recent_window:
-        max_naf_codes = min(total_naf_codes, 24)
-        max_postal_codes = min(total_postal_codes, max(20, min(24, 500 // max(1, max_naf_codes))))
-    elif is_extended_local_radius and is_recent_window and (is_single_domain or is_specific_activity_scan):
-        max_naf_codes = min(total_naf_codes, 20)
-        max_postal_codes = min(total_postal_codes, max(20, min(24, 480 // max(1, max_naf_codes))))
-    elif is_extended_local_radius and is_recent_window:
-        max_naf_codes = min(total_naf_codes, 16)
-        max_postal_codes = min(total_postal_codes, 16)
-    elif is_medium_local_radius and is_mid_window and (is_single_domain or is_specific_activity_scan):
-        max_naf_codes = min(total_naf_codes, 18)
-        max_postal_codes = min(total_postal_codes, 18)
-    elif is_medium_local_radius and is_mid_window:
-        max_naf_codes = min(total_naf_codes, 15)
-        max_postal_codes = min(total_postal_codes, 15)
-    else:
-        max_naf_codes = min(total_naf_codes, 10)
-        max_postal_codes = min(total_postal_codes, 10)
-
     return {
-        "max_naf_codes": max_naf_codes,
-        "max_postal_codes": max_postal_codes,
+        "max_naf_codes": total_naf_codes,
+        "max_postal_codes": total_postal_codes,
     }
 
 
@@ -444,7 +424,9 @@ def build_scan_diagnostics_payload(
     skipped_batch_duplicate_count: int,
     duplicate_marked: int = 0,
     phone_conflicts: int = 0,
-) -> Dict[str, int]:
+    pappers_credits_used: float = 0.0,
+    pagination_limit_hit: bool = False,
+) -> Dict[str, Any]:
     payload = {
         "requests_attempted": requests_attempted,
         "raw_companies_received": raw_companies_received,
@@ -459,6 +441,10 @@ def build_scan_diagnostics_payload(
         payload["duplicate_marked"] = duplicate_marked
     if phone_conflicts:
         payload["phone_conflicts"] = phone_conflicts
+    if pappers_credits_used:
+        payload["pappers_credits_used"] = round(pappers_credits_used, 1)
+    if pagination_limit_hit:
+        payload["pagination_limit_hit"] = True
     return payload
 
 
@@ -501,6 +487,9 @@ def build_scan_record_payload(
     naf_codes_searched: int,
     postal_codes_found: int,
     postal_codes_searched: int,
+    geo_unit_label: str,
+    geo_units_found: int,
+    geo_units_searched: int,
     search_mode: str,
     progress_total_steps: int,
 ) -> Dict[str, Any]:
@@ -518,6 +507,9 @@ def build_scan_record_payload(
         "naf_codes_searched": naf_codes_searched,
         "postal_codes_found": postal_codes_found,
         "postal_codes_searched": postal_codes_searched,
+        "geo_unit_label": geo_unit_label,
+        "geo_units_found": geo_units_found,
+        "geo_units_searched": geo_units_searched,
         "search_mode": search_mode,
         "status": "processing",
         "created_at": datetime.utcnow(),
@@ -582,11 +574,14 @@ def build_scan_success_response(
     lead_count: int,
     new_results_count: int,
     reused_results_count: int,
-    scan_diagnostics: Dict[str, int],
+    scan_diagnostics: Dict[str, Any],
     naf_codes_scanned: int,
     naf_codes_available: int,
     postal_codes_scanned: int,
     postal_codes_available: int,
+    geo_unit_label: str = "codes postaux",
+    geo_units_scanned: int = 0,
+    geo_units_available: int = 0,
 ) -> Dict[str, Any]:
     return {
         "success": True,
@@ -601,6 +596,9 @@ def build_scan_success_response(
         "naf_codes_available": naf_codes_available,
         "postal_codes_scanned": postal_codes_scanned,
         "postal_codes_available": postal_codes_available,
+        "geo_unit_label": geo_unit_label,
+        "geo_units_scanned": geo_units_scanned,
+        "geo_units_available": geo_units_available,
         "message": f"Scan terminé: {total_found} entreprises détectées",
     }
 
@@ -1354,21 +1352,32 @@ async def fetch_pappers_search_page(
     http_client: httpx.AsyncClient,
     pappers_api_key: str,
     naf_code: str,
-    postal_code: str,
+    geo_value: str,
     date_threshold: str,
     max_per_page: int,
     track_api_usage_func=None,
     user_id: Optional[str] = None,
     exclude_closed: bool = False,
+    geo_scope: str = "postal_code",
+    page: int = 1,
+    cursor: Optional[str] = None,
 ) -> Dict[str, Any]:
     pappers_params = {
         "api_token": pappers_api_key,
         "code_naf": naf_code,
-        "code_postal": postal_code,
         "date_creation_min": date_threshold,
-        "par_page": max_per_page,
-        "page": 1,
+        "date_immatriculation_rcs_min": date_threshold,
     }
+    if cursor:
+        pappers_params["curseur"] = cursor
+        pappers_params["par_curseur"] = max_per_page
+    else:
+        pappers_params["par_page"] = max_per_page
+        pappers_params["page"] = page
+    if geo_scope == "department":
+        pappers_params["departement"] = geo_value
+    else:
+        pappers_params["code_postal"] = geo_value
     if exclude_closed:
         pappers_params["entreprise_cessee"] = "false"
 
@@ -1377,23 +1386,31 @@ async def fetch_pappers_search_page(
         params=pappers_params,
     )
 
+    companies: List[Dict[str, Any]] = []
+    credits_used = 0.0
+    next_cursor = None
+    if response.status_code == 200:
+        response_payload = response.json()
+        companies = response_payload.get("resultats", [])
+        next_cursor = response_payload.get("curseurSuivant")
+        credits_used = round(len(companies) / 10, 1)
+
     if track_api_usage_func and user_id:
         await track_api_usage_func(
             user_id=user_id,
             api_type="pappers",
             endpoint="recherche",
-            credits=1,
+            credits=credits_used,
             success=(response.status_code == 200),
             error_msg=f"HTTP {response.status_code}" if response.status_code != 200 else None,
         )
 
-    companies: List[Dict[str, Any]] = []
-    if response.status_code == 200:
-        companies = response.json().get("resultats", [])
-
     return {
         "status_code": response.status_code,
         "companies": companies,
+        "credits_used": credits_used,
+        "page": page,
+        "next_cursor": next_cursor,
     }
 
 
@@ -1443,7 +1460,7 @@ async def search_pappers_batch(
                     http_client=http_client,
                     pappers_api_key=pappers_api_key,
                     naf_code=naf_code,
-                    postal_code=postal_code,
+                    geo_value=postal_code,
                     date_threshold=date_threshold,
                     max_per_page=max_per_page,
                     track_api_usage_func=track_api_usage_func,

@@ -4529,14 +4529,143 @@ class CityData(PydanticBaseModel):
     name: str
     code: str = ""
     postal_codes: List[str] = []
+    department: str = ""
+    department_code: str = ""
 
 class PappersScanRequest(PydanticBaseModel):
     domains: List[str]
     cities: List[CityData]
-    search_mode: str = "radius"  # "radius" or "multi"
+    search_mode: str = "radius"  # "radius", "multi" or "department"
     radius_km: int = 20
     max_age_days: int = 365  # Filtre date de création (par défaut 1 an)
     naf_codes: List[str] = []  # Codes NAF spécifiques pour le mode "Par activité"
+
+
+def _derive_department_code_from_postal_code(postal_code: str) -> str:
+    cleaned = re.sub(r"\D", "", postal_code or "")
+    if len(cleaned) < 2:
+        return ""
+    if cleaned.startswith("97") and len(cleaned) >= 3:
+        return cleaned[:3]
+    return cleaned[:2]
+
+
+def _extract_city_department_code(city: CityData) -> str:
+    if city.department_code:
+        return city.department_code.strip()
+
+    for postal_code in city.postal_codes or []:
+        department_code = _derive_department_code_from_postal_code(postal_code)
+        if department_code:
+            return department_code
+
+    return ""
+
+
+def _build_department_targets(cities: List[CityData]) -> tuple[list[str], str]:
+    department_labels: Dict[str, str] = {}
+
+    for city in cities:
+        department_code = _extract_city_department_code(city)
+        if not department_code:
+            continue
+
+        department_name = (city.department or "").strip()
+        if department_name:
+            department_labels[department_code] = f"{department_code} - {department_name}"
+        else:
+            department_labels[department_code] = f"Departement {department_code}"
+
+    department_codes = list(department_labels.keys())
+    location_label = ", ".join(list(department_labels.values())[:3])
+    if len(department_codes) > 3:
+        location_label += f" +{len(department_codes) - 3}"
+
+    return department_codes, location_label or "Departement"
+
+
+def _estimate_pappers_result_density(search_mode: str, radius_km: int, max_age_days: int) -> float:
+    if search_mode == "department":
+        if max_age_days <= 30:
+            return 18.0
+        if max_age_days <= 180:
+            return 24.0
+        return 30.0
+
+    if search_mode == "multi":
+        if max_age_days <= 30:
+            return 6.0
+        if max_age_days <= 180:
+            return 8.0
+        return 10.0
+
+    if radius_km <= 5:
+        return 1.5 if max_age_days <= 30 else 3.0
+    if radius_km <= 20:
+        return 8.0 if max_age_days <= 30 else 12.0
+    return 12.0 if max_age_days <= 30 else 18.0
+
+
+async def estimate_pappers_credit_need(
+    user_id: str,
+    request: PappersScanRequest,
+    scan_plan: dict,
+) -> int:
+    total_search_steps = scan_plan["total_search_steps"]
+    if total_search_steps <= 0:
+        return 0
+
+    scan_mode = request.search_mode
+    max_age_days = request.max_age_days or 365
+
+    def _bucket(days: int) -> str:
+        if days <= 30:
+            return "recent"
+        if days <= 180:
+            return "mid"
+        return "wide"
+
+    target_bucket = _bucket(max_age_days)
+    recent_scans = await db.scans.find(
+        {
+            "user_id": user_id,
+            "scan_type": "pappers_mass",
+            "scan_diagnostics.requests_attempted": {"$gt": 0},
+            "scan_diagnostics.raw_companies_received": {"$gte": 0},
+        },
+        sort=[("created_at", -1)],
+    ).to_list(length=20)
+
+    preferred_densities: List[float] = []
+    fallback_densities: List[float] = []
+
+    for scan in recent_scans:
+        diagnostics = scan.get("scan_diagnostics", {})
+        requests_attempted = diagnostics.get("requests_attempted", 0)
+        raw_companies = diagnostics.get("raw_companies_received", 0)
+        if requests_attempted <= 0:
+            continue
+
+        density = raw_companies / requests_attempted
+        if density <= 0:
+            continue
+
+        fallback_densities.append(density)
+
+        scan_bucket = _bucket(scan.get("max_age_days", 365))
+        if scan.get("search_mode") == scan_mode and scan_bucket == target_bucket:
+            preferred_densities.append(density)
+
+    if preferred_densities:
+        reference_density = sum(preferred_densities[:8]) / min(len(preferred_densities), 8)
+    elif fallback_densities:
+        reference_density = sum(fallback_densities[:10]) / min(len(fallback_densities), 10)
+    else:
+        reference_density = _estimate_pappers_result_density(scan_mode, request.radius_km, max_age_days)
+
+    reference_density = max(0.5, min(reference_density, 30.0))
+    estimated_credits = math.ceil((total_search_steps * reference_density) / 10)
+    return max(1, estimated_credits)
 
 
 async def build_pappers_scan_plan(request: PappersScanRequest) -> dict:
@@ -4551,26 +4680,41 @@ async def build_pappers_scan_plan(request: PappersScanRequest) -> dict:
     else:
         naf_codes = get_naf_codes_for_domains(request.domains)
 
-    if request.search_mode == "radius" and request.cities:
+    geo_unit_label = "codes postaux"
+
+    if request.search_mode == "department" and request.cities:
+        selected_geo_targets, location_label = _build_department_targets(request.cities)
+        if not selected_geo_targets:
+            raise HTTPException(
+                status_code=400,
+                detail="Impossible de determiner le departement a scanner depuis la ville selectionnee.",
+            )
+        all_postal_codes: List[str] = []
+        all_geo_targets = selected_geo_targets
+        geo_scope = "department"
+    elif request.search_mode == "radius" and request.cities:
         first_city = request.cities[0]
         clean_city_name = first_city.name.split("+")[0].strip()
-        max_postal_pool = 80 if request.radius_km <= 20 else 120
         all_postal_codes, location_label = await get_postal_codes_for_radius(
             city_name=clean_city_name,
             radius_km=request.radius_km,
             get_cities_in_radius_func=get_cities_in_radius,
-            max_postal_codes=max_postal_pool,
+            max_postal_codes=None,
         )
-        all_postal_codes = list(dict.fromkeys(all_postal_codes + first_city.postal_codes))[:max_postal_pool]
+        all_postal_codes = list(dict.fromkeys(all_postal_codes + first_city.postal_codes))
+        all_geo_targets = all_postal_codes
+        geo_scope = "postal_code"
     else:
         all_postal_codes, location_label = get_postal_codes_for_cities(
             request.cities,
-            max_postal_codes=120,
+            max_postal_codes=None,
         )
+        all_geo_targets = all_postal_codes
+        geo_scope = "postal_code"
 
     scan_budget = plan_pappers_scan_budget(
         total_naf_codes=len(naf_codes),
-        total_postal_codes=len(all_postal_codes),
+        total_postal_codes=len(all_geo_targets),
         search_mode=request.search_mode,
         radius_km=request.radius_km,
         max_age_days=request.max_age_days,
@@ -4581,22 +4725,33 @@ async def build_pappers_scan_plan(request: PappersScanRequest) -> dict:
     max_postal_codes = scan_budget["max_postal_codes"]
 
     selected_naf_codes = naf_codes[:max_naf_codes]
-    selected_postal_codes = all_postal_codes[:max_postal_codes]
-    total_search_steps = len(selected_naf_codes) * len(selected_postal_codes)
+    selected_geo_targets = all_geo_targets[:max_postal_codes]
+    selected_postal_codes = selected_geo_targets if geo_scope == "postal_code" else []
+    total_search_steps = len(selected_naf_codes) * len(selected_geo_targets)
+    estimated_pages_per_step = 1
+    if request.search_mode == "department":
+        estimated_pages_per_step = 3 if request.max_age_days <= 30 else 5
+    elif request.max_age_days > 30:
+        estimated_pages_per_step = 2
 
     return {
         "naf_codes": naf_codes,
         "selected_naf_codes": selected_naf_codes,
         "all_postal_codes": all_postal_codes,
         "selected_postal_codes": selected_postal_codes,
+        "geo_scope": geo_scope,
+        "geo_unit_label": "departements" if geo_scope == "department" else geo_unit_label,
+        "all_geo_targets": all_geo_targets,
+        "selected_geo_targets": selected_geo_targets,
         "location_label": location_label,
         "total_search_steps": total_search_steps,
-        "estimated_pappers_credits": total_search_steps,
-        "estimated_duration_minutes": max(1, (total_search_steps + 19) // 20) if total_search_steps else 1,
+        "estimated_duration_minutes": max(1, ((total_search_steps * estimated_pages_per_step) + 19) // 20) if total_search_steps else 1,
         "naf_codes_available": len(naf_codes),
         "naf_codes_scanned": len(selected_naf_codes),
         "postal_codes_available": len(all_postal_codes),
         "postal_codes_scanned": len(selected_postal_codes),
+        "geo_units_available": len(all_geo_targets),
+        "geo_units_scanned": len(selected_geo_targets),
     }
 
 
@@ -4608,7 +4763,7 @@ async def estimate_pappers_scan(
     user_id = current_user["sub"]
     scan_plan = await build_pappers_scan_plan(request)
     pappers_budget = await get_api_budget_snapshot(user_id, "pappers")
-    estimated_pappers_credits = scan_plan["estimated_pappers_credits"]
+    estimated_pappers_credits = await estimate_pappers_credit_need(user_id, request, scan_plan)
 
     return {
         "estimated_requests": scan_plan["total_search_steps"],
@@ -4618,6 +4773,9 @@ async def estimate_pappers_scan(
         "naf_codes_scanned": scan_plan["naf_codes_scanned"],
         "postal_codes_available": scan_plan["postal_codes_available"],
         "postal_codes_scanned": scan_plan["postal_codes_scanned"],
+        "geo_unit_label": scan_plan["geo_unit_label"],
+        "geo_units_available": scan_plan["geo_units_available"],
+        "geo_units_scanned": scan_plan["geo_units_scanned"],
         "location_label": scan_plan["location_label"],
         "pappers_budget": {
             **pappers_budget,
@@ -4662,28 +4820,33 @@ async def pappers_mass_scan(
     selected_naf_codes = scan_plan["selected_naf_codes"]
     all_postal_codes = scan_plan["all_postal_codes"]
     selected_postal_codes = scan_plan["selected_postal_codes"]
+    geo_scope = scan_plan["geo_scope"]
+    geo_unit_label = scan_plan["geo_unit_label"]
+    all_geo_targets = scan_plan["all_geo_targets"]
+    selected_geo_targets = scan_plan["selected_geo_targets"]
     location_label = scan_plan["location_label"]
     total_search_steps = scan_plan["total_search_steps"]
     total_naf_codes = scan_plan["naf_codes_scanned"]
     total_postal_codes = scan_plan["postal_codes_scanned"]
+    total_geo_units = scan_plan["geo_units_scanned"]
 
     logger.info(f"[Pappers Mass] Starting scan - {len(naf_codes)} NAF codes - mode={request.search_mode}")
-    logger.info(f"[Pappers Mass] Searching in {len(all_postal_codes)} postal codes")
+    logger.info(f"[Pappers Mass] Searching in {len(all_geo_targets)} {geo_unit_label}")
     
     # Create a "scan" record for this mass scan
     scan_id = str(uuid.uuid4())
 
     logger.info(
         f"[Pappers Mass] Search plan: {total_naf_codes}/{len(naf_codes)} NAF x "
-        f"{total_postal_codes}/{len(all_postal_codes)} CP "
+        f"{total_geo_units}/{len(all_geo_targets)} {geo_unit_label} "
         f"(radius={request.radius_km if request.search_mode == 'radius' else 0}km, "
         f"max_age={request.max_age_days}j)"
     )
     logger.info(
         f"[Pappers Mass] Plan details: NAF={selected_naf_codes[:8]}"
         f"{'...' if len(selected_naf_codes) > 8 else ''} | "
-        f"CP={selected_postal_codes[:10]}"
-        f"{'...' if len(selected_postal_codes) > 10 else ''}"
+        f"{geo_unit_label}={selected_geo_targets[:10]}"
+        f"{'...' if len(selected_geo_targets) > 10 else ''}"
     )
     
     scan_record = build_scan_record_payload(
@@ -4696,6 +4859,8 @@ async def pappers_mass_scan(
                 "name": city.name,
                 "code": city.code,
                 "postal_codes": city.postal_codes,
+                "department": city.department,
+                "department_code": city.department_code,
             }
             for city in request.cities
         ],
@@ -4706,8 +4871,11 @@ async def pappers_mass_scan(
         naf_codes_searched=total_naf_codes,
         postal_codes_found=len(all_postal_codes),
         postal_codes_searched=total_postal_codes,
+        geo_unit_label=geo_unit_label,
+        geo_units_found=len(all_geo_targets),
+        geo_units_searched=total_geo_units,
         search_mode=request.search_mode,
-        progress_total_steps=total_search_steps + 10,
+        progress_total_steps=max(total_search_steps + 10, (total_search_steps * 2) + 10),
     )
     await db.scans.insert_one(scan_record)
     
@@ -4741,6 +4909,8 @@ async def pappers_mass_scan(
     skipped_future_date_count = 0
     skipped_too_old_count = 0
     skipped_batch_duplicate_count = 0
+    pappers_credits_used = 0.0
+    pagination_limit_hit = False
     businesses_created = []
     api_errors = 0  # Compteur d'erreurs API (pour détecter épuisement crédits)
     max_api_errors = 5  # Arrêter si trop d'erreurs consécutives
@@ -4748,121 +4918,167 @@ async def pappers_mass_scan(
     seen_business_keys = set()
     user_email = user.get("email", "unknown") if user else "unknown"
     
-    # Search Pappers by NAF codes with an explicit budget adapted to the scan
-    # radius, selected domains and lookback window.
+    # Search Pappers exhaustively on the requested geography.
+    # We now keep the full requested zone instead of silently trimming it.
     async with httpx.AsyncClient(timeout=60.0) as http_client:
-        for naf_idx, naf_code in enumerate(selected_naf_codes):
+        for naf_code in selected_naf_codes:
             if api_errors >= max_api_errors:
                 logger.warning(f"[Pappers Mass] Stopping scan after {api_errors} consecutive API errors")
                 break
-                
-            for postal_idx, postal_code in enumerate(selected_postal_codes):
-                current_step += 1
-                
-                # Update progress
-                await update_scan_progress(
-                    current_step, 
-                    f"Scanning NAF {naf_code} in {postal_code}... ({total_found} businesses found)",
-                    {"total_results": total_found}
-                )
-                
-                try:
-                    page_result = await fetch_pappers_search_page(
-                        http_client=http_client,
-                        pappers_api_key=pappers_api_key,
-                        naf_code=naf_code,
-                        postal_code=postal_code,
-                        date_threshold=date_threshold,
-                        max_per_page=100,
-                        track_api_usage_func=track_api_usage,
-                        user_id=user_id,
-                        exclude_closed=True,
+
+            for geo_target in selected_geo_targets:
+                page = 1
+                cursor = None
+                seen_cursors = set()
+
+                while True:
+                    current_step += 1
+                    await update_scan_progress(
+                        current_step,
+                        f"Scanning NAF {naf_code} in {geo_target} (page {page})... ({total_found} businesses found)",
+                        {"total_results": total_found},
                     )
-                    status_code = page_result["status_code"]
-                    
-                    # API error handling (401 = insufficient credits, 429 = rate limit)
-                    if status_code == 401:
-                        api_errors += 1
-                        logger.warning(f"[Pappers Mass] 401 insufficient credits ({api_errors}/{max_api_errors})")
-                        if api_errors >= max_api_errors:
-                            break
-                        continue
-                    elif status_code == 429:
-                        api_errors += 1
-                        logger.warning(f"[Pappers Mass] 429 rate limit ({api_errors}/{max_api_errors})")
-                        await asyncio.sleep(2)  # Wait before retrying
-                        continue
-                    elif status_code != 200:
-                        continue
-                    
-                    # Reset error counter on success
-                    api_errors = 0
-                    requests_attempted += 1
-                    
-                    companies = page_result["companies"]
-                    raw_companies_received += len(companies)
-                    
-                    for company in companies:
-                        company_name = company.get("nom_entreprise", "")
-                        siren = company.get("siren", "")
-                        siret = company.get("siege", {}).get("siret", "")
-                        date_creation = company.get("date_creation", "")
-                        
-                        # Skip if no name or already exists
-                        if not company_name:
-                            skipped_missing_name_count += 1
-                            continue
-                        
-                        # ========== FILTRE STRICT SUR LA DATE DE CREATION ==========
-                        # Ensure the company was created after the configured threshold
-                        date_status, parsed_creation_date = evaluate_creation_date(date_creation, date_threshold_iso)
-                        if date_status == "missing":
-                            skipped_missing_date_count += 1
-                            logger.info(f"[Pappers] Skipped {company_name} - missing creation date")
-                            continue
-                        if date_status == "invalid":
-                            skipped_invalid_date_count += 1
-                            logger.warning(f"[Pappers] Invalid creation date for {company_name}: {date_creation}")
-                            continue
-                        if date_status == "future":
-                            skipped_future_date_count += 1
-                            logger.warning(f"[Pappers] Ignored {company_name} - inconsistent future date: {date_creation}")
-                            continue
-                        if date_status == "too_old":
-                            skipped_too_old_count += 1
-                            logger.info(f"[Pappers] Skipped {company_name} - created on {parsed_creation_date} (before {date_threshold_iso})")
-                            continue
-                        
-                        # Get address info
-                        siege = company.get("siege", {})
-                        address = siege.get("adresse_ligne_1", "")
-                        first_city_name = request.cities[0].name if request.cities else "Unknown"
-                        city = siege.get("ville", first_city_name)
-                        cp = siege.get("code_postal", postal_code)
-                        if not is_target_france_location(cp, city, address):
-                            logger.info(f"[Pappers Mass] Skipped non-FR company: {company_name} - {cp} {city}")
-                            continue
-                        business_key = siret or siren or f"{company_name}|{city}|{cp}|{date_creation}"
 
-                        if business_key in seen_business_keys:
-                            skipped_batch_duplicate_count += 1
-                            continue
-                        seen_business_keys.add(business_key)
-
-                        existing = await find_existing_business_for_reuse(
-                            db,
-                            siret=siret,
-                            siren=siren,
-                            company_name=company_name,
-                            city=city,
-                            postal_code=cp,
+                    try:
+                        page_result = await fetch_pappers_search_page(
+                            http_client=http_client,
+                            pappers_api_key=pappers_api_key,
+                            naf_code=naf_code,
+                            geo_value=geo_target,
+                            geo_scope=geo_scope,
+                            page=page,
+                            cursor=cursor,
+                            date_threshold=date_threshold,
+                            max_per_page=100,
+                            track_api_usage_func=track_api_usage,
+                            user_id=user_id,
+                            exclude_closed=True,
                         )
+                        status_code = page_result["status_code"]
 
-                        if existing:
-                            pl_ref = existing.get("pl_reference") or await generate_pl_reference()
-                            reused_context = build_reused_business_scan_context(
-                                existing=existing,
-                                pl_reference=pl_ref,
+                        if status_code == 401:
+                            api_errors += 1
+                            logger.warning(f"[Pappers Mass] 401 insufficient credits ({api_errors}/{max_api_errors})")
+                            if api_errors >= max_api_errors:
+                                break
+                            continue
+                        if status_code == 429:
+                            api_errors += 1
+                            logger.warning(f"[Pappers Mass] 429 rate limit ({api_errors}/{max_api_errors})")
+                            await asyncio.sleep(2)
+                            continue
+                        if status_code != 200:
+                            break
+
+                        api_errors = 0
+                        requests_attempted += 1
+
+                        companies = page_result["companies"]
+                        raw_companies_received += len(companies)
+                        pappers_credits_used += page_result.get("credits_used", 0.0)
+
+                        for company in companies:
+                            company_name = company.get("nom_entreprise", "")
+                            siren = company.get("siren", "")
+                            siret = company.get("siege", {}).get("siret", "")
+                            date_creation = company.get("date_creation", "")
+
+                            if not company_name:
+                                skipped_missing_name_count += 1
+                                continue
+
+                            date_status, parsed_creation_date = evaluate_creation_date(date_creation, date_threshold_iso)
+                            if date_status == "missing":
+                                skipped_missing_date_count += 1
+                                logger.info(f"[Pappers] Skipped {company_name} - missing creation date")
+                                continue
+                            if date_status == "invalid":
+                                skipped_invalid_date_count += 1
+                                logger.warning(f"[Pappers] Invalid creation date for {company_name}: {date_creation}")
+                                continue
+                            if date_status == "future":
+                                skipped_future_date_count += 1
+                                logger.warning(f"[Pappers] Ignored {company_name} - inconsistent future date: {date_creation}")
+                                continue
+                            if date_status == "too_old":
+                                skipped_too_old_count += 1
+                                logger.info(f"[Pappers] Skipped {company_name} - created on {parsed_creation_date} (before {date_threshold_iso})")
+                                continue
+
+                            siege = company.get("siege", {})
+                            address = siege.get("adresse_ligne_1", "")
+                            first_city_name = request.cities[0].name if request.cities else "Unknown"
+                            city = siege.get("ville", first_city_name)
+                            cp = siege.get("code_postal", geo_target if geo_scope == "postal_code" else "")
+                            if not is_target_france_location(cp, city, address):
+                                logger.info(f"[Pappers Mass] Skipped non-FR company: {company_name} - {cp} {city}")
+                                continue
+
+                            business_key = siret or siren or f"{company_name}|{city}|{cp}|{date_creation}"
+                            if business_key in seen_business_keys:
+                                skipped_batch_duplicate_count += 1
+                                continue
+                            seen_business_keys.add(business_key)
+
+                            existing = await find_existing_business_for_reuse(
+                                db,
+                                siret=siret,
+                                siren=siren,
+                                company_name=company_name,
+                                city=city,
+                                postal_code=cp,
+                            )
+
+                            if existing:
+                                pl_ref = existing.get("pl_reference") or await generate_pl_reference()
+                                reused_context = build_reused_business_scan_context(
+                                    existing=existing,
+                                    pl_reference=pl_ref,
+                                    scan_id=scan_id,
+                                    user_id=user_id,
+                                    company_name=company_name,
+                                    address=address,
+                                    city=city,
+                                    postal_code=cp,
+                                    siret=siret,
+                                    siren=siren,
+                                    date_creation=date_creation,
+                                    naf_code=naf_code,
+                                    fallback_city=first_city_name,
+                                )
+                                reused_business = reused_context["reused_business"]
+
+                                await db.businesses.insert_one(reused_business)
+                                await get_or_create_shared_history(reused_business["id"], pl_ref, user_id, user_email, scan_id)
+
+                                total_found += 1
+                                reused_results_count += 1
+                                visite_count += reused_context["visite_delta"]
+
+                                logger.info(reused_context["log_message"])
+                                continue
+
+                            enrichment = await enrich_business_data(
+                                company_name, city, cp, google_api_key, serper_api_key
+                            )
+
+                            contact_runtime = await resolve_pappers_contact_runtime(
+                                company=company,
+                                company_name=company_name,
+                                city=city,
+                                postal_code=cp,
+                                naf_code=naf_code,
+                                enrichment=enrichment,
+                                serper_api_key=serper_api_key,
+                                normalize_phone_func=normalize_french_phone,
+                                validate_phone_func=validate_pappers_phone,
+                            )
+                            replacement_log_message = contact_runtime["replacement_log_message"]
+                            if replacement_log_message:
+                                logger.info(replacement_log_message)
+
+                            pl_ref = await generate_pl_reference()
+                            business_payload = await resolve_pappers_post_contact_runtime(
                                 scan_id=scan_id,
                                 user_id=user_id,
                                 company_name=company_name,
@@ -4873,100 +5089,84 @@ async def pappers_mass_scan(
                                 siren=siren,
                                 date_creation=date_creation,
                                 naf_code=naf_code,
-                                fallback_city=first_city_name,
+                                contact_runtime=contact_runtime,
+                                serper_api_key=serper_api_key,
+                                pl_reference=pl_ref,
                             )
-                            reused_business = reused_context["reused_business"]
 
-                            await db.businesses.insert_one(reused_business)
-                            await get_or_create_shared_history(reused_business["id"], pl_ref, user_id, user_email, scan_id)
+                            business = Business(**business_payload)
 
-                            total_found += 1
-                            reused_results_count += 1
-                            visite_count += reused_context["visite_delta"]
+                            try:
+                                business_dict = business.dict()
+                                is_banned_domiciliation = await _apply_domiciliation_rules_to_business_dict(business_dict)
+                                insert_context = build_pappers_insert_context(
+                                    business_dict=business_dict,
+                                    company_name=company_name,
+                                    is_banned_domiciliation=is_banned_domiciliation,
+                                    counters={
+                                        "total_found": total_found,
+                                        "new_results_count": new_results_count,
+                                        "visite_count": visite_count,
+                                        "lead_count": lead_count,
+                                    },
+                                )
+                                insert_phone = insert_context["phone"]
+                                insert_log_message = insert_context["insert_log_message"]
+                                logger.info(insert_log_message)
+                                result = await db.businesses.insert_one(business_dict)
+                                logger.info(f"[Pappers Mass] Inserted business with _id: {result.inserted_id}")
+                                businesses_created.append(business)
 
-                            logger.info(reused_context["log_message"])
+                                if insert_phone:
+                                    await link_businesses_by_phone(business.id, insert_phone)
+                                insert_runtime = insert_context["insert_runtime"]
+                                total_found = insert_runtime["counters"]["total_found"]
+                                new_results_count = insert_runtime["counters"]["new_results_count"]
+                                visite_count = insert_runtime["counters"]["visite_count"]
+                                lead_count = insert_runtime["counters"]["lead_count"]
+
+                                logger.info(f"{insert_runtime['log_prefix']} {insert_runtime['log_message']}")
+                            except Exception as insert_err:
+                                logger.error(f"[Pappers Mass] Insert error for {company_name}: {insert_err}")
+
+                        next_cursor = page_result.get("next_cursor")
+                        if next_cursor:
+                            if next_cursor in seen_cursors:
+                                logger.warning(f"[Pappers Mass] Cursor loop detected for {naf_code} / {geo_target}")
+                                break
+                            seen_cursors.add(next_cursor)
+                            cursor = next_cursor
+                            page += 1
+                            if page >= 250:
+                                pagination_limit_hit = True
+                                logger.warning(f"[Pappers Mass] Cursor pagination safety stop reached for {naf_code} / {geo_target}")
+                                break
+                            await asyncio.sleep(0.2)
                             continue
-                        
-                        # ========== ENRICHISSEMENT INTELLIGENT ==========
-                        # Search phone, website, and Google presence via APIs
-                        enrichment = await enrich_business_data(
-                            company_name, city, cp, google_api_key, serper_api_key
-                        )
-                        
-                        contact_runtime = await resolve_pappers_contact_runtime(
-                            company=company,
-                            company_name=company_name,
-                            city=city,
-                            postal_code=cp,
-                            naf_code=naf_code,
-                            enrichment=enrichment,
-                            serper_api_key=serper_api_key,
-                            normalize_phone_func=normalize_french_phone,
-                            validate_phone_func=validate_pappers_phone,
-                        )
-                        replacement_log_message = contact_runtime["replacement_log_message"]
-                        if replacement_log_message:
-                            logger.info(replacement_log_message)
 
-                        pl_ref = await generate_pl_reference()
-                        business_payload = await resolve_pappers_post_contact_runtime(
-                            scan_id=scan_id,
-                            user_id=user_id,
-                            company_name=company_name,
-                            address=address,
-                            city=city,
-                            postal_code=cp,
-                            siret=siret,
-                            siren=siren,
-                            date_creation=date_creation,
-                            naf_code=naf_code,
-                            contact_runtime=contact_runtime,
-                            serper_api_key=serper_api_key,
-                            pl_reference=pl_ref,
-                        )
-                        
-                        business = Business(**business_payload)
-                        
-                        try:
-                            business_dict = business.dict()
-                            is_banned_domiciliation = await _apply_domiciliation_rules_to_business_dict(business_dict)
-                            insert_context = build_pappers_insert_context(
-                                business_dict=business_dict,
-                                company_name=company_name,
-                                is_banned_domiciliation=is_banned_domiciliation,
-                                counters={
-                                    "total_found": total_found,
-                                    "new_results_count": new_results_count,
-                                    "visite_count": visite_count,
-                                    "lead_count": lead_count,
-                                },
-                            )
-                            insert_phone = insert_context["phone"]
-                            insert_log_message = insert_context["insert_log_message"]
-                            logger.info(insert_log_message)
-                            result = await db.businesses.insert_one(business_dict)
-                            logger.info(f"[Pappers Mass] Inserted business with _id: {result.inserted_id}")
-                            businesses_created.append(business)
-                            
-                            # Link with same phone number
-                            if insert_phone:
-                                await link_businesses_by_phone(business.id, insert_phone)
-                            insert_runtime = insert_context["insert_runtime"]
-                            total_found = insert_runtime["counters"]["total_found"]
-                            new_results_count = insert_runtime["counters"]["new_results_count"]
-                            visite_count = insert_runtime["counters"]["visite_count"]
-                            lead_count = insert_runtime["counters"]["lead_count"]
-                            
-                            logger.info(f"{insert_runtime['log_prefix']} {insert_runtime['log_message']}")
-                        except Exception as insert_err:
-                            logger.error(f"[Pappers Mass] Insert error for {company_name}: {insert_err}")
+                        if len(companies) < 100:
+                            break
 
-                except Exception as e:
-                    logger.error(f"Error scanning NAF {naf_code} in {postal_code}: {e}")
-                    continue
-                
-                # Small delay to avoid rate limits
-                await asyncio.sleep(0.2)
+                        if page >= 25:
+                            pagination_limit_hit = True
+                            logger.warning(f"[Pappers Mass] Pagination safety stop reached for {naf_code} / {geo_target}")
+                            break
+
+                        page += 1
+                        await asyncio.sleep(0.2)
+                        continue
+
+                    except Exception as e:
+                        logger.error(f"Error scanning NAF {naf_code} in {geo_target} page {page}: {e}")
+                        break
+
+                    await asyncio.sleep(0.2)
+
+                if api_errors >= max_api_errors:
+                    break
+
+            if api_errors >= max_api_errors:
+                break
     
     initial_scan_diagnostics = build_scan_diagnostics_payload(
         requests_attempted=requests_attempted,
@@ -4977,6 +5177,8 @@ async def pappers_mass_scan(
         skipped_future_date_count=skipped_future_date_count,
         skipped_too_old_count=skipped_too_old_count,
         skipped_batch_duplicate_count=skipped_batch_duplicate_count,
+        pappers_credits_used=pappers_credits_used,
+        pagination_limit_hit=pagination_limit_hit,
     )
 
     # Update scan record - COMPLETE
@@ -5052,6 +5254,8 @@ async def pappers_mass_scan(
         skipped_batch_duplicate_count=skipped_batch_duplicate_count,
         duplicate_marked=deduplication_summary.get("duplicate_marked", 0),
         phone_conflicts=deduplication_summary.get("phone_conflicts", 0),
+        pappers_credits_used=pappers_credits_used,
+        pagination_limit_hit=pagination_limit_hit,
     )
 
     return build_scan_success_response(
@@ -5066,6 +5270,9 @@ async def pappers_mass_scan(
         naf_codes_available=len(naf_codes),
         postal_codes_scanned=total_postal_codes,
         postal_codes_available=len(all_postal_codes),
+        geo_unit_label=geo_unit_label,
+        geo_units_scanned=total_geo_units,
+        geo_units_available=len(all_geo_targets),
     )
 
 
