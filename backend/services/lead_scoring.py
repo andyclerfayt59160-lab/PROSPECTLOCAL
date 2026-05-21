@@ -25,6 +25,7 @@ def _coerce_float(value) -> float:
 def _build_google_presence(business: dict) -> tuple[str, str]:
     reviews = _coerce_int(business.get("google_reviews_count"))
     rating = _coerce_float(business.get("google_rating"))
+    google_audit_status = (business.get("google_presence_audit_status") or "").strip().lower()
     has_google = bool(
         business.get("google_place_id")
         or business.get("has_google")
@@ -39,6 +40,9 @@ def _build_google_presence(business: dict) -> tuple[str, str]:
         if reviews >= 5:
             return "present", f"Google present ({reviews} avis)"
         return "fragile", "Google present mais peu travaille"
+
+    if google_audit_status == "not_found":
+        return "missing", "Fiche Google absente"
 
     return "unknown", "Presence Google a verifier"
 
@@ -62,6 +66,29 @@ def _build_pagesjaunes_presence(business: dict) -> tuple[str, str]:
     return "unknown", "Presence PagesJaunes a verifier"
 
 
+def _build_legal_presence(business: dict) -> tuple[str, str]:
+    verification_status = (business.get("siret_verification_status") or "").strip().lower()
+    etat_administratif = (business.get("etat_administratif") or "").strip().upper()
+    is_closed = bool(
+        business.get("is_closed")
+        or business.get("is_inexploitable")
+        or etat_administratif == "F"
+    )
+
+    if is_closed:
+        return "closed", "Entreprise radiee ou inactive"
+
+    if business.get("siret"):
+        if verification_status == "warning":
+            return "warning", "Entreprise declaree a recouper"
+        return "confirmed", "Entreprise declaree"
+
+    if verification_status == "not_found":
+        return "missing", "Donnees legales non confirmees"
+
+    return "unknown", "Donnees legales a verifier"
+
+
 def _build_visibility_gap(
     google_status: str,
     website_status: str,
@@ -72,6 +99,24 @@ def _build_visibility_gap(
             "Site a creer",
             "PagesJaunes seule sans site exploitable",
             "Priorite site web puis fiche Google si absente.",
+        )
+    if google_status == "missing" and website_status == "missing" and pj_status == "present":
+        return (
+            "PJ seule",
+            "PagesJaunes presente mais sans Google ni site",
+            "Priorite fiche Google puis site web.",
+        )
+    if google_status == "missing" and website_status == "present" and pj_status == "present":
+        return (
+            "Sans Google",
+            "Site et PagesJaunes presents mais Google absent",
+            "Priorite fiche Google pour la visibilite locale.",
+        )
+    if google_status == "missing" and website_status == "missing" and pj_status == "absent":
+        return (
+            "Invisible localement",
+            "Google absent, sans site ni PagesJaunes",
+            "Priorite visibilite locale complete puis site web.",
         )
     if website_status == "missing" and google_status in {"present", "solid", "fragile"} and pj_status == "absent":
         return (
@@ -146,6 +191,7 @@ def build_solocal_priority_metadata(business: dict) -> dict:
     google_status, google_label = _build_google_presence(business)
     website_status, website_label = _build_website_presence(business)
     pj_status, pj_label = _build_pagesjaunes_presence(business)
+    legal_status, legal_label = _build_legal_presence(business)
     visibility_gap_label, visibility_gap_summary, sales_pitch_hint = _build_visibility_gap(
         google_status=google_status,
         website_status=website_status,
@@ -156,12 +202,31 @@ def build_solocal_priority_metadata(business: dict) -> dict:
     if google_status == "fragile":
         score += 14
         digital_signals.append(google_label)
+    elif google_status == "missing":
+        score += 18
+        digital_signals.append(google_label)
     elif google_status == "solid":
         score = max(0, score - 4)
     elif google_status == "present":
         score += 4
     elif google_status == "unknown":
         digital_signals.append(google_label)
+
+    if legal_status == "confirmed":
+        score += 6
+        digital_signals.append(legal_label)
+    elif legal_status == "warning":
+        score = max(0, score - 8)
+        reasons.append("activite legale a recouper")
+        digital_signals.append(legal_label)
+    elif legal_status == "missing" and business.get("source") == "web_scan":
+        score = max(0, score - 20)
+        reasons.append("existence legale non confirmee")
+        digital_signals.append(legal_label)
+    elif legal_status == "closed":
+        score = max(0, score - 120)
+        reasons.append("entreprise radiee")
+        digital_signals.append(legal_label)
 
     if creation_days is not None:
         if creation_days <= 30:
@@ -190,6 +255,12 @@ def build_solocal_priority_metadata(business: dict) -> dict:
 
     if google_status == "unknown" and website_status == "missing" and pj_status == "present":
         score += 20
+    elif google_status == "missing" and website_status == "missing" and pj_status == "present":
+        score += 26
+    elif google_status == "missing" and website_status == "present" and pj_status == "present":
+        score += 12
+    elif google_status == "missing" and website_status == "missing" and pj_status == "absent":
+        score += 28
     elif website_status == "missing" and google_status in {"present", "solid", "fragile"} and pj_status == "absent":
         score += 18
     elif website_status == "missing" and google_status in {"present", "solid", "fragile"}:
@@ -344,6 +415,8 @@ def build_solocal_priority_metadata(business: dict) -> dict:
         "website_presence_label": website_label,
         "pagesjaunes_presence_status": pj_status,
         "pagesjaunes_presence_label": pj_label,
+        "legal_presence_status": legal_status,
+        "legal_presence_label": legal_label,
         "recommended_contact_mode": recommended_contact_mode,
         "creation_age_days": creation_days,
         "related_clue_potential": related_clue_potential,

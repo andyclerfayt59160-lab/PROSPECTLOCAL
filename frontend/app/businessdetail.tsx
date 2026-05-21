@@ -232,6 +232,7 @@ export default function BusinessDetailScreen() {
   
   // Full enrichment state
   const [enrichingFull, setEnrichingFull] = useState(false);
+  const [auditingVisibility, setAuditingVisibility] = useState(false);
   
   // Inexploitable state
   const [markingInexploitable, setMarkingInexploitable] = useState(false);
@@ -590,6 +591,33 @@ export default function BusinessDetailScreen() {
     }
   };
 
+  const handleAuditDigitalVisibility = async () => {
+    setAuditingVisibility(true);
+    try {
+      const response = await axios.post(
+        `${API_URL}/api/businesses/${businessId}/digital-visibility-audit`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (response.data?.success && response.data?.business) {
+        setBusiness((prev: any) => ({ ...prev, ...response.data.business }));
+        Alert.alert(
+          'Audit termine',
+          response.data.summary || 'La presence Google et PagesJaunes a ete re-verifiee.'
+        );
+      }
+    } catch (error: any) {
+      console.error('Error auditing digital visibility:', error);
+      Alert.alert(
+        'Erreur',
+        error?.response?.data?.detail || "Impossible de lancer l'audit de presence digitale"
+      );
+    } finally {
+      setAuditingVisibility(false);
+    }
+  };
+
   const handleMarkDomiciliation = async () => {
     const confirmationMessage =
       `Taguer l'adresse de "${business?.name}" comme domiciliation ?\n\n` +
@@ -921,6 +949,20 @@ Activité NAF: ${business.activite_naf || business.libelle_naf || 'N/A'}`;
                       </Text>
                     </View>
                   )}
+                  {!!business.legal_presence_label && (
+                    <View style={styles.legalPresenceBadge}>
+                      <Ionicons name="shield-checkmark-outline" size={12} color="#065F46" />
+                      <Text style={styles.legalPresenceBadgeText}>
+                        {business.legal_presence_label}
+                      </Text>
+                    </View>
+                  )}
+                  {!!business.digital_visibility_summary && (
+                    <Text style={styles.digitalVisibilitySummary}>{business.digital_visibility_summary}</Text>
+                  )}
+                  {!!business.sales_pitch_hint && (
+                    <Text style={styles.digitalVisibilityPitch}>{business.sales_pitch_hint}</Text>
+                  )}
                   {phoneReliabilityMeta && business.phone_reliability_label && (
                     <View style={[styles.phoneReliabilityBadge, { backgroundColor: phoneReliabilityMeta.bg }]}>
                       <Ionicons name={phoneReliabilityMeta.icon} size={12} color={phoneReliabilityMeta.color} />
@@ -940,6 +982,21 @@ Activité NAF: ${business.activite_naf || business.libelle_naf || 'N/A'}`;
                   </Text>
                 </View>
               )}
+
+              <TouchableOpacity
+                style={[styles.digitalAuditButton, auditingVisibility && styles.digitalAuditButtonDisabled]}
+                onPress={handleAuditDigitalVisibility}
+                disabled={auditingVisibility}
+              >
+                {auditingVisibility ? (
+                  <ActivityIndicator size="small" color="#1D4ED8" />
+                ) : (
+                  <Ionicons name="scan-outline" size={16} color="#1D4ED8" />
+                )}
+                <Text style={styles.digitalAuditButtonText}>
+                  {auditingVisibility ? 'Audit en cours...' : 'Auditer Google + PagesJaunes + legal'}
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -2304,6 +2361,35 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1D4ED8',
   },
+  legalPresenceBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#D1FAE5',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 6,
+  },
+  legalPresenceBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#065F46',
+  },
+  digitalVisibilitySummary: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#374151',
+  },
+  digitalVisibilityPitch: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#1D4ED8',
+    fontWeight: '600',
+  },
   solocalContactModeBadge: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -2316,6 +2402,27 @@ const styles = StyleSheet.create({
   solocalContactModeBadgeText: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  digitalAuditButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  digitalAuditButtonDisabled: {
+    opacity: 0.7,
+  },
+  digitalAuditButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1D4ED8',
   },
   heroHighlightsRow: {
     flexDirection: 'row',

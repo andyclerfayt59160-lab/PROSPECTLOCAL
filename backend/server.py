@@ -91,6 +91,7 @@ from services.enrichment import (
     auto_enrich_scan_with_web,
     enrich_business_full as service_enrich_business_full,
     enrich_business_data as service_enrich_business_data,
+    enrich_with_google_places,
     normalize_french_phone,
     validate_pappers_phone,
 )
@@ -2217,6 +2218,170 @@ async def update_pagesjaunes_status(
         "score": score,
         "score_reason": score_reason,
         "pj_confidence": "confirmed" if has_pj else "not_found"
+    }
+
+
+@api_router.post("/businesses/{business_id}/digital-visibility-audit")
+async def audit_business_digital_visibility(
+    business_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Run an explicit Google + PagesJaunes audit for one business.
+
+    This is intentionally on-demand so we improve web lead quality without
+    silently burning credits across an entire scan.
+    """
+    user_id = current_user["sub"]
+    business = await find_user_business_by_id(user_id, business_id)
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    user_keys = await fetch_user_api_keys(user_id)
+    google_api_key = user_keys.get("google_api_key", "")
+    serper_api_key = user_keys.get("serper_api_key", "")
+
+    if not google_api_key and not serper_api_key:
+        raise HTTPException(
+            status_code=403,
+            detail="Configure au moins une clé Google ou Serper dans Paramètres > Clés API pour lancer cet audit."
+        )
+
+    name = (business.get("name") or "").strip()
+    city = (business.get("city") or "").strip()
+    postal_code = (business.get("postal_code") or "").strip()
+    if not postal_code:
+        address_blob = business.get("address") or ""
+        postal_match = re.search(r"\b\d{5}\b", address_blob)
+        postal_code = postal_match.group(0) if postal_match else ""
+
+    update_fields: Dict[str, Any] = {
+        "visibility_audited_at": datetime.utcnow(),
+    }
+    summary_lines: List[str] = []
+
+    if google_api_key:
+        async with httpx.AsyncClient(timeout=20.0) as http_client:
+            google_audit = await enrich_with_google_places(
+                http_client=http_client,
+                company_name=name,
+                city=city,
+                postal_code=postal_code,
+                google_api_key=google_api_key,
+                track_usage_callback=track_api_usage,
+                user_id=user_id,
+            )
+
+        update_fields["google_presence_audited_at"] = datetime.utcnow()
+        if google_audit.get("has_google"):
+            update_fields.update({
+                "has_google": True,
+                "google_presence_audit_status": "confirmed",
+                "google_place_id": google_audit.get("google_place_id"),
+                "google_rating": google_audit.get("google_rating", 0),
+                "google_reviews_count": google_audit.get("google_reviews_count", 0),
+            })
+            if google_audit.get("website") and (
+                not business.get("website_url")
+                or is_directory_listing_url(business.get("website_url"))
+            ):
+                update_fields["website_url"] = google_audit.get("website")
+                update_fields["has_website"] = True
+            reviews = google_audit.get("google_reviews_count", 0) or 0
+            summary_lines.append(f"Google confirme ({reviews} avis)")
+        else:
+            update_fields["google_presence_audit_status"] = "not_found"
+            if not business.get("google_place_id") and not business.get("has_google"):
+                update_fields["has_google"] = False
+                update_fields["google_place_id"] = None
+                update_fields["google_rating"] = 0
+                update_fields["google_reviews_count"] = 0
+            summary_lines.append("Google non trouve")
+    else:
+        summary_lines.append("Google non verifie")
+
+    if serper_api_key:
+        has_pj, pj_url, pj_confidence, pj_status, _ = await detect_pagesjaunes_presence(
+            name=name,
+            phone=business.get("phone", ""),
+            city=city,
+            postal_code=postal_code,
+            serper_api_key=serper_api_key,
+            track_usage_callback=track_api_usage,
+            user_id=user_id,
+        )
+        update_fields.update({
+            "has_pagesjaunes": has_pj,
+            "pagesjaunes_url": pj_url,
+            "pj_confidence": pj_status,
+            "pj_last_checked_at": datetime.utcnow(),
+        })
+        if has_pj:
+            summary_lines.append("PagesJaunes presente")
+        elif pj_status == "not_found":
+            summary_lines.append("PagesJaunes absente")
+        else:
+            summary_lines.append("PagesJaunes a verifier")
+    else:
+        summary_lines.append("PagesJaunes non verifiee")
+
+    google_types = business.get("types", [])
+    sirene_data = await get_sirene_data(name, city, postal_code)
+    update_fields["legal_presence_audited_at"] = datetime.utcnow()
+    if sirene_data:
+        naf_code = sirene_data.get("activite_principale", "")
+        naf_label = sirene_data.get("libelle_activite", "")
+        coherence = check_activity_coherence(google_types, naf_code, naf_label)
+        annuaire_data = await get_annuaire_entreprises_data(
+            siret=sirene_data.get("siret"),
+            siren=sirene_data.get("siren"),
+        )
+
+        update_fields.update({
+            "siret": sirene_data.get("siret"),
+            "siren": sirene_data.get("siren"),
+            "nom_sirene": sirene_data.get("nom_complet"),
+            "activite_naf": naf_code,
+            "libelle_naf": naf_label,
+            "siret_match_score": sirene_data.get("match_score", 0),
+            "siret_verification_status": coherence["status"],
+            "siret_verification_message": coherence["message"],
+            "siret_enriched_at": datetime.utcnow(),
+            "etat_administratif": sirene_data.get("etat_administratif", "A"),
+            "date_creation_sirene": sirene_data.get("date_creation"),
+            "pappers_url": f"https://www.pappers.fr/entreprise/{sirene_data.get('siren')}" if sirene_data.get("siren") else business.get("pappers_url"),
+            "tranche_effectif": annuaire_data.get("tranche_effectif") if annuaire_data.get("success") else business.get("tranche_effectif"),
+        })
+
+        is_closed = sirene_data.get("is_closed", False)
+        if is_closed:
+            update_fields.update({
+                "is_closed": True,
+                "is_inexploitable": True,
+                "inexploitable_reason": "radie",
+                "inexploitable_at": datetime.utcnow(),
+                "inexploitable_by": current_user.get("email", "system"),
+            })
+            summary_lines.append("Entreprise radiee ou inactive")
+        else:
+            summary_lines.append(f"Entreprise declaree ({sirene_data.get('siret')})")
+    else:
+        update_fields["siret_verification_status"] = "not_found"
+        update_fields["siret_verification_message"] = "Aucune entreprise legale retrouvee sur cette recherche"
+        summary_lines.append("Donnees legales non confirmees")
+
+    updated_business = {**business, **update_fields}
+    updated_business.update(build_solocal_priority_metadata(updated_business))
+
+    await db.businesses.update_one(
+        {"id": business_id},
+        {"$set": update_fields}
+    )
+
+    return {
+        "success": True,
+        "summary": " | ".join(summary_lines),
+        "business": updated_business,
     }
 
 # ========== MARK BUSINESS AS VIEWED ==========

@@ -27,7 +27,9 @@ def set_serper_api_key(key: str):
 async def check_pagesjaunes_direct(
     name: str, 
     city: str, 
-    serper_api_key: str = None
+    serper_api_key: str = None,
+    track_usage_callback=None,
+    user_id: str = None,
 ) -> Tuple[bool, Optional[str], float, str]:
     """
     Vérifie si l'entreprise existe sur pagesjaunes.fr via une recherche Google (Serper API)
@@ -85,6 +87,15 @@ async def check_pagesjaunes_direct(
                     json=data,
                     timeout=10.0
                 )
+
+                if track_usage_callback and user_id:
+                    await track_usage_callback(
+                        user_id=user_id,
+                        api_type="serper",
+                        endpoint="pagesjaunes_presence_check",
+                        credits=1,
+                        success=(response.status_code == 200)
+                    )
                 
                 if response.status_code == 200:
                     results = response.json()
@@ -158,11 +169,29 @@ async def check_pagesjaunes_direct(
                     return False, search_url, 0.0, "to_verify"
                     
             except httpx.TimeoutException:
+                if track_usage_callback and user_id:
+                    await track_usage_callback(
+                        user_id=user_id,
+                        api_type="serper",
+                        endpoint="pagesjaunes_presence_check",
+                        credits=1,
+                        success=False,
+                        error_msg="timeout"
+                    )
                 logger.warning(f"[PJ Check] Timeout Serper pour {name}")
                 search_url = f"https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui={quote_plus(clean_name)}&ou={quote_plus(clean_city)}"
                 return False, search_url, 0.0, "to_verify"
                 
     except Exception as e:
+        if api_key and track_usage_callback and user_id:
+            await track_usage_callback(
+                user_id=user_id,
+                api_type="serper",
+                endpoint="pagesjaunes_presence_check",
+                credits=1,
+                success=False,
+                error_msg=str(e)
+            )
         logger.error(f"[PJ Check] Erreur pour {name}: {e}")
         return False, None, 0.0, "to_verify"
 
@@ -172,7 +201,9 @@ async def detect_pagesjaunes_presence(
     phone: str, 
     city: str, 
     postal_code: str = "", 
-    serper_api_key: str = None
+    serper_api_key: str = None,
+    track_usage_callback=None,
+    user_id: str = None,
 ) -> Tuple[bool, Optional[str], float, str, Optional[dict]]:
     """
     Détecte la présence sur PagesJaunes en combinant plusieurs méthodes:
@@ -200,7 +231,13 @@ async def detect_pagesjaunes_presence(
     sirene_data = await get_sirene_data(name, city, postal_code)
     
     # 2. Vérification directe sur PagesJaunes
-    has_pj, pj_url, confidence, pj_status = await check_pagesjaunes_direct(name, city, serper_api_key)
+    has_pj, pj_url, confidence, pj_status = await check_pagesjaunes_direct(
+        name,
+        city,
+        serper_api_key,
+        track_usage_callback=track_usage_callback,
+        user_id=user_id,
+    )
     
     if has_pj:
         logger.info(f"✓ PJ CONFIRMÉ pour {name}: {pj_url}")
@@ -214,7 +251,9 @@ async def detect_pagesjaunes_presence(
             has_pj_sirene, pj_url_sirene, conf_sirene, status_sirene = await check_pagesjaunes_direct(
                 sirene_name, 
                 sirene_data.get("ville", city),
-                serper_api_key
+                serper_api_key,
+                track_usage_callback=track_usage_callback,
+                user_id=user_id,
             )
             if has_pj_sirene:
                 logger.info(f"✓ PJ trouvé via SIRENE pour {name}")
