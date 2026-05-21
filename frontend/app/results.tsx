@@ -130,6 +130,11 @@ interface ScanRecord {
   visite_terrain_count?: number;
   web_enriched_count?: number;
   web_phones_found?: number;
+  auto_visibility_audit_status?: string;
+  last_visibility_audit_summary?: string;
+  last_visibility_audit_at?: string;
+  last_visibility_audit_count?: number;
+  cleaned_directory_count?: number;
   new_results_count?: number;
   reused_results_count?: number;
   leads_with_phone?: number;
@@ -862,10 +867,22 @@ export default function ResultsScreen() {
       ]);
 
       if (scanResult.status === 'fulfilled') {
-        setScanMeta(scanResult.value.data || null);
+        const loadedScanMeta = scanResult.value.data || null;
+        setScanMeta(loadedScanMeta);
+        if (loadedScanMeta?.last_visibility_audit_summary) {
+          const cleanedSuffix = loadedScanMeta.cleaned_directory_count
+            ? ` • ${loadedScanMeta.cleaned_directory_count} faux sites annuaire nettoyes`
+            : '';
+          setBatchAuditSummary(`${loadedScanMeta.last_visibility_audit_summary}${cleanedSuffix}`);
+        } else if (loadedScanMeta?.auto_visibility_audit_status === 'running') {
+          setBatchAuditSummary('Audit intelligent automatique en cours...');
+        } else {
+          setBatchAuditSummary('');
+        }
       } else {
         console.error('Error loading scan meta:', scanResult.reason);
         setScanMeta(null);
+        setBatchAuditSummary('');
       }
 
       if (businessesResult.status !== 'fulfilled') {

@@ -142,6 +142,9 @@ def sanitize_directory_website_fields(business_data: Optional[dict]) -> Optional
     if "pappers.fr" in candidate_url_lower:
         business_data["pappers_url"] = business_data.get("pappers_url") or candidate_url
 
+    if business_data.get("source_type") == "website":
+        business_data["source_type"] = "directory"
+
     business_data["website_url"] = ""
     business_data["has_website"] = False
     return business_data

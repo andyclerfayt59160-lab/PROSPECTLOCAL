@@ -8,6 +8,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne
 import os
 import logging
+import copy
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
@@ -524,6 +525,79 @@ async def build_scan_history_payload(scan: dict) -> dict:
     scan_payload["new_results_count"] = metrics["new_results_count"]
     scan_payload["reused_results_count"] = metrics["reused_results_count"]
     return scan_payload
+
+
+async def persist_sanitized_business_fields(business: Optional[dict]) -> bool:
+    """
+    Persist directory/marketplace website cleanup when needed.
+    Returns True when the business document was updated in MongoDB.
+    """
+    if not isinstance(business, dict) or not business.get("id"):
+        return False
+
+    before = {
+        "website_url": business.get("website_url"),
+        "has_website": business.get("has_website"),
+        "pappers_url": business.get("pappers_url"),
+        "source_type": business.get("source_type"),
+        "data_sources": copy.deepcopy(business.get("data_sources")),
+    }
+
+    sanitize_directory_website_fields(business)
+
+    after = {
+        "website_url": business.get("website_url"),
+        "has_website": business.get("has_website"),
+        "pappers_url": business.get("pappers_url"),
+        "source_type": business.get("source_type"),
+        "data_sources": copy.deepcopy(business.get("data_sources")),
+    }
+
+    if before == after:
+        return False
+
+    await db.businesses.update_one(
+        {"id": business["id"]},
+        {
+            "$set": {
+                "website_url": after["website_url"],
+                "has_website": after["has_website"],
+                "pappers_url": after["pappers_url"],
+                "source_type": after["source_type"],
+                "data_sources": after["data_sources"],
+                "updated_at": datetime.utcnow(),
+            }
+        },
+    )
+    return True
+
+
+async def cleanup_directory_websites_for_scope(
+    *,
+    scan_id: Optional[str] = None,
+    business_ids: Optional[List[str]] = None,
+) -> int:
+    """
+    Clean persisted directory/marketplace URLs that should not count as real
+    business websites. Scoped by scan or by explicit business ids.
+    """
+    query: Dict[str, Any] = {
+        "$or": [
+            {"website_url": {"$exists": True, "$nin": [None, ""]}},
+            {"data_sources.website_url.url": {"$exists": True, "$nin": [None, ""]}},
+        ]
+    }
+    if scan_id:
+        query["scan_id"] = scan_id
+    if business_ids:
+        query["id"] = {"$in": business_ids}
+
+    candidates = await db.businesses.find(query, {"_id": 0}).to_list(1000)
+    updated_count = 0
+    for business in candidates:
+        if await persist_sanitized_business_fields(business):
+            updated_count += 1
+    return updated_count
 
 # ============= SHARED HISTORY FUNCTIONS =============
 
@@ -2412,23 +2486,14 @@ async def audit_business_digital_visibility(
     )
 
 
-@api_router.post("/scans/{scan_id}/digital-visibility-audit")
-async def audit_scan_digital_visibility(
+async def run_scan_digital_visibility_audit(
+    *,
     scan_id: str,
-    limit: int = Query(default=8, ge=1, le=15),
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Audit the top web leads of a scan in batch.
-
-    We deliberately cap the batch size to keep credit consumption explicit and
-    predictable while still upgrading the best candidates automatically.
-    """
-    user_id = current_user["sub"]
-    scan = await db.scans.find_one({"id": scan_id, "user_id": user_id}, {"_id": 0})
-    if not scan:
-        raise HTTPException(status_code=404, detail="Scan not found")
-
+    user_id: str,
+    current_user: dict,
+    limit: int = 8,
+    create_notification: bool = False,
+) -> dict:
     user_keys = await fetch_user_api_keys(user_id)
     google_api_key = user_keys.get("google_api_key", "")
     serper_api_key = user_keys.get("serper_api_key", "")
@@ -2438,6 +2503,8 @@ async def audit_scan_digital_visibility(
             status_code=403,
             detail="Configure au moins une clé Google ou Serper dans Paramètres > Clés API pour lancer cet audit."
         )
+
+    cleaned_directory_count = await cleanup_directory_websites_for_scope(scan_id=scan_id)
 
     query = build_active_scan_business_query(scan_id)
     query["$and"].append({"source": {"$ne": "pappers"}})
@@ -2453,15 +2520,35 @@ async def audit_scan_digital_visibility(
     ]
 
     if not candidates:
-        return {
+        result = {
             "success": True,
             "audited_count": 0,
+            "failed_count": 0,
             "google_confirmed": 0,
             "pagesjaunes_confirmed": 0,
             "legal_confirmed": 0,
             "updated_business_ids": [],
+            "cleaned_directory_count": cleaned_directory_count,
             "message": "Aucun lead web exploitable a auditer sur ce scan.",
+            "failures": [],
         }
+        await db.scans.update_one(
+            {"id": scan_id},
+            {
+                "$set": {
+                    "last_visibility_audit_summary": result["message"],
+                    "last_visibility_audit_at": datetime.utcnow(),
+                    "last_visibility_audit_count": 0,
+                    "last_visibility_audit_google_confirmed": 0,
+                    "last_visibility_audit_pagesjaunes_confirmed": 0,
+                    "last_visibility_audit_legal_confirmed": 0,
+                    "last_visibility_audit_failed_count": 0,
+                    "cleaned_directory_count": cleaned_directory_count,
+                    "auto_visibility_audit_status": "done",
+                }
+            },
+        )
+        return result
 
     def _candidate_rank_key(business: dict):
         audit_complete_penalty = 1 if _is_visibility_audit_complete(business) else 0
@@ -2513,6 +2600,51 @@ async def audit_scan_digital_visibility(
         if (business.get("siret_verification_status") or "").strip().lower() in {"verified", "ok", "confirmed", "warning"}
         or business.get("siret")
     )
+    summary = (
+        f"{len(updated_businesses)} lead(s) audites • "
+        f"{google_confirmed} Google confirmes • "
+        f"{pagesjaunes_confirmed} PagesJaunes confirmees • "
+        f"{legal_confirmed} entreprises legales confirmees"
+    )
+
+    await db.scans.update_one(
+        {"id": scan_id},
+        {
+            "$set": {
+                "last_visibility_audit_summary": summary,
+                "last_visibility_audit_at": datetime.utcnow(),
+                "last_visibility_audit_count": len(updated_businesses),
+                "last_visibility_audit_google_confirmed": google_confirmed,
+                "last_visibility_audit_pagesjaunes_confirmed": pagesjaunes_confirmed,
+                "last_visibility_audit_legal_confirmed": legal_confirmed,
+                "last_visibility_audit_failed_count": len(failed_audits),
+                "cleaned_directory_count": cleaned_directory_count,
+                "auto_visibility_audit_status": "done",
+            }
+        },
+    )
+
+    if create_notification:
+        await db.notifications.insert_one(
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "type": "enrichment_complete",
+                "title": f"[WEB] Audit intelligent termine - {len(updated_businesses)} lead(s)",
+                "message": summary,
+                "scan_id": scan_id,
+                "data": {
+                    "scan_id": scan_id,
+                    "audited_count": len(updated_businesses),
+                    "google_confirmed": google_confirmed,
+                    "pagesjaunes_confirmed": pagesjaunes_confirmed,
+                    "legal_confirmed": legal_confirmed,
+                    "cleaned_directory_count": cleaned_directory_count,
+                },
+                "is_read": False,
+                "created_at": datetime.utcnow(),
+            }
+        )
 
     return {
         "success": True,
@@ -2522,9 +2654,37 @@ async def audit_scan_digital_visibility(
         "pagesjaunes_confirmed": pagesjaunes_confirmed,
         "legal_confirmed": legal_confirmed,
         "updated_business_ids": [business.get("id") for business in updated_businesses if business.get("id")],
+        "cleaned_directory_count": cleaned_directory_count,
         "message": f"{len(updated_businesses)} lead(s) audites sur {len(ranked_candidates)} cibles retenues.",
+        "summary": summary,
         "failures": failed_audits,
     }
+
+
+@api_router.post("/scans/{scan_id}/digital-visibility-audit")
+async def audit_scan_digital_visibility(
+    scan_id: str,
+    limit: int = Query(default=8, ge=1, le=15),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Audit the top web leads of a scan in batch.
+
+    We deliberately cap the batch size to keep credit consumption explicit and
+    predictable while still upgrading the best candidates automatically.
+    """
+    user_id = current_user["sub"]
+    scan = await db.scans.find_one({"id": scan_id, "user_id": user_id}, {"_id": 0})
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    return await run_scan_digital_visibility_audit(
+        scan_id=scan_id,
+        user_id=user_id,
+        current_user=current_user,
+        limit=limit,
+        create_notification=False,
+    )
 
 # ========== MARK BUSINESS AS VIEWED ==========
 @api_router.patch("/businesses/{business_id}/viewed")
@@ -3360,7 +3520,7 @@ async def get_business_by_id(
             business["phone_source_url"] = None
             business["phone_requires_review"] = True
 
-        sanitize_directory_website_fields(business)
+        await persist_sanitized_business_fields(business)
     
     # Get user status
     user_status = await db.user_business_status.find_one({
@@ -3925,6 +4085,9 @@ async def get_scan_businesses_with_status(
         raise HTTPException(status_code=404, detail="Scan not found")
     
     user_id = current_user["sub"]
+
+    if scan.get("scan_type") == "web_scan":
+        await cleanup_directory_websites_for_scope(scan_id=scan_id)
     
     # Build base query from the canonical active-scan definition so scan
     # history, results and deletes all count the same businesses.
@@ -5704,6 +5867,47 @@ async def _build_web_scan_plan(
     }
 
 
+async def auto_audit_top_web_leads(
+    *,
+    scan_id: str,
+    user_id: str,
+    user_email: str,
+    limit: int = 8,
+) -> None:
+    """
+    Run a background audit of the strongest web leads right after a scan ends.
+    """
+    try:
+        await db.scans.update_one(
+            {"id": scan_id},
+            {
+                "$set": {
+                    "auto_visibility_audit_status": "running",
+                    "auto_visibility_audit_started_at": datetime.utcnow(),
+                }
+            },
+        )
+        await run_scan_digital_visibility_audit(
+            scan_id=scan_id,
+            user_id=user_id,
+            current_user={"sub": user_id, "email": user_email},
+            limit=limit,
+            create_notification=True,
+        )
+    except Exception as exc:
+        logger.warning("[WARN] Audit automatique web impossible pour le scan %s: %s", scan_id, exc)
+        await db.scans.update_one(
+            {"id": scan_id},
+            {
+                "$set": {
+                    "auto_visibility_audit_status": "failed",
+                    "auto_visibility_audit_error": str(exc),
+                    "auto_visibility_audit_at": datetime.utcnow(),
+                }
+            },
+        )
+
+
 async def _check_serper_budget_for_plan(user_id: str, estimated_serper_credits: int) -> Dict[str, Any]:
     budget_snapshot = await get_api_budget_snapshot(user_id, "serper")
     credits_remaining = budget_snapshot["credits_remaining"]
@@ -6124,6 +6328,18 @@ async def web_scan(
         logger.error(f"Failed to send scan complete email: {email_error}")
     
     logger.info(f"[DONE] Web scan complete: {total_found} businesses found")
+
+    if total_found > 0 and (google_api_key or serper_api_key):
+        auto_audit_limit = min(10, max(3, min(total_found, leads_with_phone + leads_without_phone)))
+        asyncio.create_task(
+            auto_audit_top_web_leads(
+                scan_id=scan_id,
+                user_id=user_id,
+                user_email=current_user.get("email", ""),
+                limit=auto_audit_limit,
+            )
+        )
+        logger.info(f"[AUTO] Audit intelligent web lance en arriere-plan pour le scan {scan_id}")
     
     # Auto-enrich with web data (background task) for businesses without phone
     if serper_api_key and leads_without_phone > 0:
