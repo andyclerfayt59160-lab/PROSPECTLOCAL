@@ -8,6 +8,9 @@ type Props = {
   totalUnverified: number;
   totalVisiteTerrain: number;
   opportunityMax: number;
+  legalConfirmed: number;
+  legalMissing: number;
+  auditedVisibility: number;
   currentViewLabel: string;
   currentViewCount: number;
 };
@@ -19,13 +22,16 @@ export default function ResultsOverview({
   totalUnverified,
   totalVisiteTerrain,
   opportunityMax,
+  legalConfirmed,
+  legalMissing,
+  auditedVisibility,
   currentViewLabel,
   currentViewCount,
 }: Props) {
   if (listFocusMode) {
     return (
       <View style={styles.listFocusBanner}>
-        <Text style={styles.listFocusBannerTitle}>Vue liste plein écran</Text>
+        <Text style={styles.listFocusBannerTitle}>Vue liste plein ecran</Text>
         <Text style={styles.listFocusBannerText}>
           {currentViewLabel} • {currentViewCount} fiche(s)
         </Text>
@@ -33,25 +39,38 @@ export default function ResultsOverview({
     );
   }
 
+  const showAuditDetails = auditedVisibility > 0 || legalConfirmed > 0 || legalMissing > 0;
+
   return (
     <View style={styles.statsBar}>
-      <Text style={styles.statsTotal}>{total} établissements au total</Text>
+      <Text style={styles.statsTotal}>{total} etablissements au total</Text>
       <View style={styles.statsBreakdown}>
         <Text style={styles.statsBreakdownItem}>
-          <Text style={styles.statsVerified}>{totalVerified}</Text> vérifiés
+          <Text style={styles.statsVerified}>{totalVerified}</Text> verifies
         </Text>
         <Text style={styles.statsBreakdownSep}>•</Text>
         <Text style={styles.statsBreakdownItem}>
-          <Text style={styles.statsUnverified}>{totalUnverified}</Text> à vérifier
+          <Text style={styles.statsUnverified}>{totalUnverified}</Text> a verifier
         </Text>
         <Text style={styles.statsBreakdownSep}>•</Text>
         <Text style={styles.statsBreakdownItem}>
           <Text style={styles.statsVisiteTerrain}>{totalVisiteTerrain}</Text> visite terrain
         </Text>
       </View>
-      {opportunityMax > 0 ? (
+      {opportunityMax > 0 || showAuditDetails ? (
         <View style={styles.statsDetails}>
-          <Text style={styles.statItem}>🔥 {opportunityMax} opportunités max</Text>
+          {opportunityMax > 0 ? (
+            <Text style={styles.statItemWarm}>🔥 {opportunityMax} opportunites max</Text>
+          ) : null}
+          {auditedVisibility > 0 ? (
+            <Text style={styles.statItemInfo}>🧭 {auditedVisibility} audites</Text>
+          ) : null}
+          {legalConfirmed > 0 ? (
+            <Text style={styles.statItemSuccess}>✅ {legalConfirmed} legales confirmees</Text>
+          ) : null}
+          {legalMissing > 0 ? (
+            <Text style={styles.statItemWarning}>⚠️ {legalMissing} a recouper</Text>
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -107,7 +126,22 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 2,
   },
-  statItem: {
+  statItemWarm: {
+    fontSize: 14,
+    color: '#B45309',
+    fontWeight: '700',
+  },
+  statItemInfo: {
+    fontSize: 14,
+    color: '#1D4ED8',
+    fontWeight: '700',
+  },
+  statItemSuccess: {
+    fontSize: 14,
+    color: '#047857',
+    fontWeight: '700',
+  },
+  statItemWarning: {
     fontSize: 14,
     color: '#B45309',
     fontWeight: '700',

@@ -8,6 +8,9 @@ type StatsLike = {
   opportunity_max?: number;
   rebound_available?: number;
   fragile_available?: number;
+  legal_confirmed?: number;
+  legal_missing?: number;
+  audited_visibility?: number;
 };
 
 type Props = {
@@ -113,6 +116,39 @@ export default function ResultsFilterBar({
           >
             <Text style={[styles.filterPillText, styles.filterPillTextAmber, activeFilter === 'fragile' && styles.filterPillTextActive]}>
               ⚠️ Direct fragile ({stats.fragile_available || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.legal_confirmed || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillGreen, activeFilter === 'legal_confirmed' && styles.filterPillGreenActive]}
+            onPress={() => onChangeFilter('legal_confirmed')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextGreen, activeFilter === 'legal_confirmed' && styles.filterPillTextActive]}>
+              ✅ Legales OK ({stats.legal_confirmed || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.legal_missing || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillRed, activeFilter === 'legal_missing' && styles.filterPillRedActive]}
+            onPress={() => onChangeFilter('legal_missing')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextRed, activeFilter === 'legal_missing' && styles.filterPillTextActive]}>
+              ⚠️ A recouper ({stats.legal_missing || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.audited_visibility || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillBlue, activeFilter === 'audited' && styles.filterPillBlueActive]}
+            onPress={() => onChangeFilter('audited')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextBlue, activeFilter === 'audited' && styles.filterPillTextActive]}>
+              🧭 Audites ({stats.audited_visibility || 0})
             </Text>
           </TouchableOpacity>
         ) : null}

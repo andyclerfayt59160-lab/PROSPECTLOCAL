@@ -69,6 +69,11 @@ interface Business {
   phone_reliability_status?: 'verified' | 'review' | 'rejected' | 'missing';
   phone_reliability_label?: string;
   phone_reliability_reason?: string;
+  siret?: string;
+  siret_verification_status?: string;
+  legal_presence_audited_at?: string;
+  visibility_audited_at?: string;
+  etat_administratif?: string;
 }
 
 interface Stats {
@@ -86,6 +91,9 @@ interface Stats {
   fragile_available: number;
   visite_terrain: number;
   pappers_count: number;
+  legal_confirmed: number;
+  legal_missing: number;
+  audited_visibility: number;
 }
 
 interface ScanDiagnostics {
@@ -127,7 +135,7 @@ interface ScanRecord {
 }
 
 // Filter types
-type FilterType = 'all' | 'no_pj' | 'no_website' | 'low_reviews' | 'opportunity_max' | 'new' | 'visite_terrain' | 'pappers' | 'rebound' | 'fragile';
+type FilterType = 'all' | 'no_pj' | 'no_website' | 'low_reviews' | 'opportunity_max' | 'new' | 'visite_terrain' | 'pappers' | 'rebound' | 'fragile' | 'legal_confirmed' | 'legal_missing' | 'audited';
 
 // View mode: verified / unverified / visite_terrain
 type ViewMode = 'verified' | 'unverified' | 'visite_terrain';
@@ -441,6 +449,7 @@ const PHONE_RELIABILITY_META: Record<string, { color: string; bg: string; icon: 
 };
 
 type PJState = 'present' | 'absent' | 'unknown';
+type LegalState = 'confirmed' | 'missing' | 'warning' | 'closed' | 'unknown';
 
 export default function ResultsScreen() {
   const router = useRouter();
@@ -719,6 +728,15 @@ export default function ResultsScreen() {
       case 'fragile':
         filtered = sourceList.filter(b => b.contact_route === 'fragile');
         break;
+      case 'legal_confirmed':
+        filtered = sourceList.filter(b => getLegalState(b) === 'confirmed');
+        break;
+      case 'legal_missing':
+        filtered = sourceList.filter(b => ['missing', 'warning'].includes(getLegalState(b)));
+        break;
+      case 'audited':
+        filtered = sourceList.filter(b => !!b.visibility_audited_at || !!b.legal_presence_audited_at);
+        break;
       case 'visite_terrain':
         filtered = sourceList.filter(b => b.lead_type === 'visite_terrain' || (!b.phone && b.address));
         break;
@@ -884,6 +902,9 @@ export default function ResultsScreen() {
       const reboundAvailable = allBusinesses.filter((b: Business) => !!b.related_clue_potential).length;
       const fragileAvailable = allBusinesses.filter((b: Business) => b.contact_route === 'fragile').length;
       const pappersCount = allBusinesses.filter((b: Business) => b.source === 'pappers').length;
+      const legalConfirmed = allBusinesses.filter((b: Business) => getLegalState(b) === 'confirmed').length;
+      const legalMissing = allBusinesses.filter((b: Business) => ['missing', 'warning'].includes(getLegalState(b))).length;
+      const auditedVisibility = allBusinesses.filter((b: Business) => !!b.visibility_audited_at || !!b.legal_presence_audited_at).length;
       
       setStats({
         ...response.data.stats,
@@ -897,6 +918,9 @@ export default function ResultsScreen() {
             fragile_available: fragileAvailable,
             visite_terrain: loadedVisiteTerrain.length,
             pappers_count: pappersCount,
+            legal_confirmed: legalConfirmed,
+            legal_missing: legalMissing,
+            audited_visibility: auditedVisibility,
           });
     } catch (error) {
       console.error('Error loading results:', error);
@@ -1077,6 +1101,42 @@ export default function ResultsScreen() {
     return { emoji: '🟡', label: 'PJ?', bg: '#FFF3E0' };
   };
 
+  const getLegalState = (item: Business): LegalState => {
+    const verificationStatus = (item.siret_verification_status || '').trim().toLowerCase();
+    const etatAdministratif = (item.etat_administratif || '').trim().toUpperCase();
+
+    if (etatAdministratif === 'F') {
+      return 'closed';
+    }
+    if (verificationStatus === 'warning') {
+      return 'warning';
+    }
+    if (verificationStatus === 'not_found') {
+      return 'missing';
+    }
+    if (item.siret || ['verified', 'ok', 'confirmed'].includes(verificationStatus)) {
+      return 'confirmed';
+    }
+    return 'unknown';
+  };
+
+  const getLegalBadgeMeta = (item: Business) => {
+    const legalState = getLegalState(item);
+    if (legalState === 'confirmed') {
+      return { label: 'Legale confirmee', color: '#047857', bg: '#D1FAE5', icon: 'shield-checkmark-outline' as const };
+    }
+    if (legalState === 'missing') {
+      return { label: 'Legale a verifier', color: '#B91C1C', bg: '#FEE2E2', icon: 'shield-outline' as const };
+    }
+    if (legalState === 'warning') {
+      return { label: 'Legale a recouper', color: '#B45309', bg: '#FEF3C7', icon: 'alert-circle-outline' as const };
+    }
+    if (legalState === 'closed') {
+      return { label: 'Entreprise fermee', color: '#6B7280', bg: '#F3F4F6', icon: 'close-circle-outline' as const };
+    }
+    return { label: 'Legal non audite', color: '#475569', bg: '#E2E8F0', icon: 'help-circle-outline' as const };
+  };
+
   const getCreationBadge = (dateCreation?: string) => {
     if (!dateCreation) {
       return null;
@@ -1126,6 +1186,7 @@ export default function ResultsScreen() {
       const contactMode = item.recommended_contact_mode ? CONTACT_MODE_META[item.recommended_contact_mode] : null;
       const contactRoute = item.contact_route ? CONTACT_ROUTE_META[item.contact_route] : null;
       const phoneReliability = item.phone_reliability_status ? PHONE_RELIABILITY_META[item.phone_reliability_status] : null;
+      const legalBadge = getLegalBadgeMeta(item);
     
     return (
       <TouchableOpacity 
@@ -1215,6 +1276,12 @@ export default function ResultsScreen() {
                 </Text>
               </View>
             )}
+            <View style={[styles.legalBadge, { backgroundColor: legalBadge.bg }]}>
+              <Ionicons name={legalBadge.icon} size={12} color={legalBadge.color} />
+              <Text style={[styles.legalBadgeText, { color: legalBadge.color }]} numberOfLines={1}>
+                {legalBadge.label}
+              </Text>
+            </View>
             {!!item.next_best_action && (
             <View style={styles.nextActionBadge}>
               <Ionicons name="flash-outline" size={12} color="#6D28D9" />
@@ -1376,6 +1443,9 @@ export default function ResultsScreen() {
         totalUnverified={stats?.total_unverified || unverifiedBusinesses.length}
         totalVisiteTerrain={stats?.total_visite_terrain || visiteTerrainBusinesses.length}
         opportunityMax={stats?.opportunity_max || 0}
+        legalConfirmed={stats?.legal_confirmed || 0}
+        legalMissing={stats?.legal_missing || 0}
+        auditedVisibility={stats?.audited_visibility || 0}
         currentViewLabel={currentViewLabel}
         currentViewCount={currentViewCount}
       />
@@ -1956,6 +2026,20 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   phoneReliabilityBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  legalBadge: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  legalBadgeText: {
     fontSize: 11,
     fontWeight: '700',
   },
