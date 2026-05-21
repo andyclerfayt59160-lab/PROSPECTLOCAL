@@ -913,6 +913,14 @@ Activité NAF: ${business.activite_naf || business.libelle_naf || 'N/A'}`;
                   {!!business.solocal_priority_reason && (
                     <Text style={styles.solocalPriorityReason}>{business.solocal_priority_reason}</Text>
                   )}
+                  {!!business.digital_visibility_label && (
+                    <View style={styles.digitalVisibilityBadge}>
+                      <Ionicons name="globe-outline" size={12} color="#1D4ED8" />
+                      <Text style={styles.digitalVisibilityBadgeText}>
+                        {business.digital_visibility_label}
+                      </Text>
+                    </View>
+                  )}
                   {phoneReliabilityMeta && business.phone_reliability_label && (
                     <View style={[styles.phoneReliabilityBadge, { backgroundColor: phoneReliabilityMeta.bg }]}>
                       <Ionicons name={phoneReliabilityMeta.icon} size={12} color={phoneReliabilityMeta.color} />
@@ -2279,6 +2287,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: '#4B5563',
+  },
+  digitalVisibilityBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#DBEAFE',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 6,
+  },
+  digitalVisibilityBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1D4ED8',
   },
   solocalContactModeBadge: {
     alignSelf: 'flex-start',

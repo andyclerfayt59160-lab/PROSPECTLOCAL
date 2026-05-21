@@ -55,6 +55,9 @@ interface Business {
   solocal_priority_score?: number;
   solocal_priority_label?: string;
   solocal_priority_reason?: string;
+  digital_visibility_label?: string;
+  digital_visibility_summary?: string;
+  sales_pitch_hint?: string;
   recommended_contact_mode?: 'appel' | 'visite' | 'creuser' | 'verifier';
   related_clue_potential?: boolean;
   related_clue_reason?: string;
@@ -1124,6 +1127,14 @@ export default function ResultsScreen() {
               {item.solocal_priority_reason}
             </Text>
           )}
+            {!!item.digital_visibility_label && (
+              <View style={styles.visibilityGapBadge}>
+                <Ionicons name="globe-outline" size={12} color="#1D4ED8" />
+                <Text style={styles.visibilityGapBadgeText} numberOfLines={1}>
+                  {item.digital_visibility_label}
+                </Text>
+              </View>
+            )}
             {contactRoute && !!item.contact_route_label && (
               <View style={[styles.contactRouteBadge, { backgroundColor: contactRoute.bg }]}>
                 <Ionicons name={contactRoute.icon} size={12} color={contactRoute.color} />
@@ -1808,6 +1819,22 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 11,
     color: '#6B7280',
+  },
+  visibilityGapBadge: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#DBEAFE',
+  },
+  visibilityGapBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1D4ED8',
   },
   contactRouteBadge: {
     marginTop: 6,
