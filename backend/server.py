@@ -96,6 +96,7 @@ from services.enrichment import (
 )
 from services.pappers_scan import (
     get_naf_codes_for_domains,
+    get_naf_preview_items,
     get_postal_codes_for_cities,
     get_postal_codes_for_radius,
     plan_pappers_scan_budget,
@@ -4737,6 +4738,7 @@ async def build_pappers_scan_plan(request: PappersScanRequest) -> dict:
     return {
         "naf_codes": naf_codes,
         "selected_naf_codes": selected_naf_codes,
+        "selected_naf_labels": get_naf_preview_items(selected_naf_codes),
         "all_postal_codes": all_postal_codes,
         "selected_postal_codes": selected_postal_codes,
         "geo_scope": geo_scope,
@@ -4771,6 +4773,7 @@ async def estimate_pappers_scan(
         "estimated_duration_minutes": scan_plan["estimated_duration_minutes"],
         "naf_codes_available": scan_plan["naf_codes_available"],
         "naf_codes_scanned": scan_plan["naf_codes_scanned"],
+        "selected_naf_labels": scan_plan["selected_naf_labels"],
         "postal_codes_available": scan_plan["postal_codes_available"],
         "postal_codes_scanned": scan_plan["postal_codes_scanned"],
         "geo_unit_label": scan_plan["geo_unit_label"],

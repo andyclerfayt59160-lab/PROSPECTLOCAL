@@ -35,6 +35,46 @@ const DOMAINS = [
   { id: 'ALL', label: 'Tous les domaines', description: 'Scan massif de toutes les activités', color: '#6366F1', count: 77 },
 ];
 
+const DOMAIN_PRESENTATION: Record<string, { label?: string; description?: string; count?: number }> = {
+  HABITAT: {
+    description: 'Plomberie, electricite, chauffage, peinture, couverture, menuiserie...',
+    count: 28,
+  },
+  COMMERCE: {
+    description: 'Commerce de proximite : alimentation, pharmacie, fleuriste, optique...',
+    count: 22,
+  },
+  RESTAURATION: {
+    count: 7,
+  },
+  BEAUTE: {
+    count: 3,
+  },
+  AUTO: {
+    description: 'Garage, carrosserie, controle technique, auto-ecole...',
+    count: 9,
+  },
+  SANTE: {
+    count: 12,
+  },
+  B2B: {
+    description: 'Avocat, comptable, architecture, nettoyage...',
+    count: 20,
+  },
+  AUTRE: {
+    count: 8,
+  },
+  ALL: {
+    description: 'Tous les domaines utiles a So Local',
+    count: 109,
+  },
+};
+
+interface NafPreviewItem {
+  code: string;
+  label: string;
+}
+
 interface City {
   name: string;
   nom?: string;
@@ -91,6 +131,7 @@ interface PappersScanEstimate {
   estimated_duration_minutes: number;
   naf_codes_available: number;
   naf_codes_scanned: number;
+  selected_naf_labels?: NafPreviewItem[];
   postal_codes_available: number;
   postal_codes_scanned: number;
   geo_unit_label?: string;
@@ -112,6 +153,15 @@ const formatCreditValue = (value?: number) => {
     return '0';
   }
   return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+};
+
+const getDomainCardMeta = (domain: { id: string; label: string; description: string; count: number }) => {
+  const presentation = DOMAIN_PRESENTATION[domain.id];
+  return {
+    label: presentation?.label ?? domain.label,
+    description: presentation?.description ?? domain.description,
+    count: presentation?.count ?? domain.count,
+  };
 };
 
 const getScanGeoUnitLabel = (scan: ScanHistoryItem) => scan.geo_unit_label || 'codes postaux';
@@ -1323,14 +1373,16 @@ export default function PappersScanScreen() {
   };
 
   const getSelectedCount = () => {
-    if (selectedDomains.includes('ALL')) return 77;
+    if (selectedDomains.includes('ALL')) return DOMAIN_PRESENTATION.ALL?.count ?? 77;
     let count = 0;
     selectedDomains.forEach(domainId => {
       const domain = DOMAINS.find(d => d.id === domainId);
-      if (domain) count += domain.count;
+      if (domain) count += getDomainCardMeta(domain).count;
     });
     return count;
   };
+
+  const getDisplayedNafPreview = () => scanEstimate?.selected_naf_labels?.slice(0, 10) ?? [];
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1559,6 +1611,7 @@ export default function PappersScanScreen() {
             {DOMAINS.map((domain) => {
               const isSelected = selectedDomains.includes(domain.id) || 
                 (selectedDomains.includes('ALL') && domain.id !== 'ALL');
+              const domainMeta = getDomainCardMeta(domain);
               
               return (
                 <TouchableOpacity
@@ -1570,14 +1623,14 @@ export default function PappersScanScreen() {
                   onPress={() => toggleDomain(domain.id)}
                 >
                   <View style={styles.domainHeader}>
-                    <Text style={styles.domainLabel}>{domain.label}</Text>
+                    <Text style={styles.domainLabel}>{domainMeta.label}</Text>
                     {isSelected && (
                       <Ionicons name="checkmark-circle" size={20} color={domain.color} />
                     )}
                   </View>
-                  <Text style={styles.domainDescription}>{domain.description}</Text>
+                  <Text style={styles.domainDescription}>{domainMeta.description}</Text>
                   <Text style={[styles.domainCount, { color: domain.color }]}>
-                    {domain.count} activités
+                    {domainMeta.count} activités
                   </Text>
                 </TouchableOpacity>
               );
@@ -1603,6 +1656,26 @@ export default function PappersScanScreen() {
                 <Text style={styles.estimationHint}>
                   Crédits Pappers restants ce mois-ci : {formatCreditValue(scanEstimate.pappers_budget.credits_remaining)}/{formatCreditValue(scanEstimate.pappers_budget.monthly_budget)} • après ce scan : {formatCreditValue(scanEstimate.pappers_budget.remaining_after_scan)}
                 </Text>
+              )}
+              {scanEstimate?.selected_naf_labels && scanEstimate.selected_naf_labels.length > 0 && (
+                <View style={styles.nafPreviewCard}>
+                  <Text style={styles.nafPreviewTitle}>Activités réellement couvertes</Text>
+                  <View style={styles.nafPreviewGrid}>
+                    {getDisplayedNafPreview().map((item) => (
+                      <View key={`${item.code}-${item.label}`} style={styles.nafPreviewPill}>
+                        <Text style={styles.nafPreviewCode}>{item.code}</Text>
+                        <Text style={styles.nafPreviewLabel} numberOfLines={2}>
+                          {item.label}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                  <Text style={styles.estimationHint}>
+                    {scanEstimate.selected_naf_labels.length > 10
+                      ? `+ ${scanEstimate.selected_naf_labels.length - 10} autres activites NAF seront aussi incluses dans le scan.`
+                      : 'Toutes les activites NAF du scan sont listees ici.'}
+                  </Text>
+                </View>
               )}
               {scanEstimate && (
                 <View style={styles.estimationPilotCard}>
@@ -2508,6 +2581,49 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#334155',
+  },
+  nafPreviewCard: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
+    gap: 8,
+  },
+  nafPreviewTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#3730A3',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  nafPreviewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  nafPreviewPill: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    minWidth: 124,
+    maxWidth: '100%',
+    gap: 4,
+  },
+  nafPreviewCode: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#4F46E5',
+  },
+  nafPreviewLabel: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#334155',
+    fontWeight: '600',
   },
   estimationPilotCard: {
     marginTop: 10,

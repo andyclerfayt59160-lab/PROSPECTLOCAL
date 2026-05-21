@@ -53,11 +53,16 @@ DOMAIN_NAF_CODES = {
         "4322A", "4322B",
         "4329A", "4329B",
         "4331Z", "4332A", "4332B", "4332C", "4333Z", "4334Z", "4339Z",
-        "4391A", "4391B", "4399A", "4399B", "4399C", "4399D"
+        "4391A", "4391B", "4399A", "4399B", "4399C", "4399D",
+        "4752A", "4752B", "4753Z",
     ],
-    "COMMERCE": ["4711A", "4711B", "4711C", "4711D", "4711E", "4711F", "4719A", "4719B", "4721Z", "4722Z", "4723Z", "4724Z", "4725Z", "4726Z"],
+    "COMMERCE": [
+        "4711A", "4711B", "4711C", "4711D", "4711E", "4711F", "4719A", "4719B",
+        "4721Z", "4722Z", "4723Z", "4724Z", "4725Z", "4726Z",
+        "4771Z", "4772A", "4772B", "4773Z", "4775Z", "4776Z", "4777Z", "4778A",
+    ],
     "RESTAURATION": ["5610A", "5610B", "5610C", "5621Z", "5629A", "5629B", "5630Z"],
-    "AUTO": ["4511Z", "4519Z", "4520A", "4520B", "4531Z", "4532Z", "4540Z"],
+    "AUTO": ["4511Z", "4519Z", "4520A", "4520B", "4531Z", "4532Z", "4540Z", "7120A", "8553Z"],
     "SANTE": ["8610Z", "8621Z", "8622A", "8622B", "8622C", "8623Z", "8690A", "8690B", "8690C", "8690D", "8690E", "8690F"],
     "SERVICES": ["6910Z", "6920Z", "7010Z", "7021Z", "7022Z", "7111Z", "7112A", "7112B", "7120A", "7120B", "7311Z", "7312Z"],
     "B2B": [
@@ -65,6 +70,7 @@ DOMAIN_NAF_CODES = {
         "7010Z", "7021Z", "7022Z",
         "7111Z", "7112A", "7112B", "7120A", "7120B",
         "7311Z", "7312Z",
+        "1812Z", "1813Z", "7410Z",
         "8010Z",
         "8121Z", "8122Z", "8129A", "8129B",
     ],
@@ -120,6 +126,17 @@ NAF_LABELS = {
     "4724Z": "Pain et pâtisserie",
     "4725Z": "Boissons",
     "4726Z": "Tabac",
+    "4752A": "Quincaillerie, peintures et verres",
+    "4752B": "Commerce de detail de quincaillerie, peintures et verres",
+    "4753Z": "Revetements de sols et murs en magasin specialise",
+    "4771Z": "Commerce de detail d habillement",
+    "4772A": "Commerce de detail de la chaussure",
+    "4772B": "Commerce de detail de maroquinerie et articles de voyage",
+    "4773Z": "Pharmacie",
+    "4775Z": "Commerce de detail de parfumerie et produits de beaute",
+    "4776Z": "Commerce de detail de fleurs, plantes et animaux",
+    "4777Z": "Commerce de detail d horlogerie et bijouterie",
+    "4778A": "Commerce de detail d optique",
     # Restauration
     "5610A": "Restauration traditionnelle",
     "5610B": "Cafétérias et self-services",
@@ -136,6 +153,7 @@ NAF_LABELS = {
     "4531Z": "Commerce équipements auto",
     "4532Z": "Commerce pièces détachées",
     "4540Z": "Commerce motos",
+    "8553Z": "Enseignement de la conduite",
     # Santé
     "8610Z": "Activités hospitalières",
     "8621Z": "Médecine générale",
@@ -162,6 +180,9 @@ NAF_LABELS = {
     "7120B": "Analyses et contrôles",
     "7311Z": "Agences de publicité",
     "7312Z": "Régies publicitaires",
+    "7410Z": "Activites specialisees de design",
+    "1812Z": "Imprimerie",
+    "1813Z": "Activites de pre-presse",
     # Tech
     "6201Z": "Programmation informatique",
     "6202A": "Conseil en systèmes et logiciels",
@@ -194,6 +215,17 @@ NAF_LABELS = {
 def get_naf_label(naf_code: str) -> str:
     """Get the label for a NAF code"""
     return NAF_LABELS.get(naf_code, "")
+
+
+def get_naf_preview_items(naf_codes: List[str]) -> List[Dict[str, str]]:
+    """Build a readable preview of the NAF coverage included in the scan."""
+    return [
+        {
+            "code": naf_code,
+            "label": get_naf_label(naf_code) or naf_code,
+        }
+        for naf_code in naf_codes
+    ]
 
 
 def get_naf_codes_for_domains(domains: List[str]) -> List[str]:
