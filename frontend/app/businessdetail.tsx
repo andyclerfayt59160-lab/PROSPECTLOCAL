@@ -241,6 +241,7 @@ export default function BusinessDetailScreen() {
   
   // Move to visite terrain state
   const [movingToVisite, setMovingToVisite] = useState(false);
+  const [markingDomiciliation, setMarkingDomiciliation] = useState(false);
   const contactModeMeta = business?.recommended_contact_mode ?
     CONTACT_MODE_META[business.recommended_contact_mode]
     : null;
@@ -586,6 +587,60 @@ export default function BusinessDetailScreen() {
       Alert.alert('Erreur', 'Impossible de déplacer la fiche');
     } finally {
       setMovingToVisite(false);
+    }
+  };
+
+  const handleMarkDomiciliation = async () => {
+    const confirmationMessage =
+      `Taguer l'adresse de "${business?.name}" comme domiciliation ?\n\n` +
+      `Les fiches rattachées à cette adresse resteront dans l'application, mais elles ne seront plus proposées dans les visites terrain futures.`;
+
+    const confirmed = await new Promise<boolean>((resolve) => {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        resolve(window.confirm(confirmationMessage));
+        return;
+      }
+
+      Alert.alert(
+        'Adresse de domiciliation',
+        confirmationMessage,
+        [
+          { text: 'Annuler', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Confirmer', style: 'destructive', onPress: () => resolve(true) },
+        ]
+      );
+    });
+
+    if (!confirmed) return;
+
+    setMarkingDomiciliation(true);
+    try {
+      const response = await axios.patch(
+        `${API_URL}/api/businesses/${businessId}/mark-domiciliation`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      setBusiness((prev: any) => ({
+        ...prev,
+        domiciliation_address: true,
+        exclude_from_visites: true,
+        visite_exclusion_reason: 'domiciliation_address',
+        lead_type: prev?.lead_type === 'visite_terrain' ? 'standard' : prev?.lead_type,
+        phone_unreachable: false,
+        manual_visite_terrain: false,
+      }));
+
+      const updatedBusinesses = response.data?.updated_businesses ?? 1;
+      Alert.alert(
+        'Adresse taguée',
+        `Adresse marquée comme domiciliation. ${updatedBusinesses} fiche(s) liée(s) seront retirées des visites terrain futures.`
+      );
+    } catch (error) {
+      console.error('Error marking domiciliation:', error);
+      Alert.alert('Erreur', 'Impossible de marquer cette adresse comme domiciliation');
+    } finally {
+      setMarkingDomiciliation(false);
     }
   };
 
@@ -1683,10 +1738,12 @@ COLONNE DROITE:
           styles={styles}
           copiedField={copiedField}
           shouldShowManualVisiteBadge={shouldShowManualVisiteBadge}
+          markingDomiciliation={markingDomiciliation}
           openExternalLink={openExternalLink}
           copyToClipboard={copyToClipboard}
           onCallPhone={(phone) => Linking.openURL(`tel:${phone}`)}
           onMoveToVisite={handleMoveToVisite}
+          onMarkDomiciliation={handleMarkDomiciliation}
         />
 
         {false && (<View style={styles.section}>
@@ -2571,6 +2628,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
+  addressBlock: {
+    gap: 8,
+    marginBottom: 4,
+  },
   contactContent: {
     flex: 1,
     marginLeft: 12,
@@ -2599,6 +2660,46 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#1C1C1E',
+  },
+  domiciliationInlineButton: {
+    marginLeft: 36,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFF7ED',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#FDBA74',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  domiciliationInlineButtonDisabled: {
+    opacity: 0.7,
+  },
+  domiciliationInlineButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B45309',
+  },
+  domiciliationInlineBadge: {
+    marginLeft: 36,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FEF3C7',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+  },
+  domiciliationInlineBadgeText: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B45309',
   },
   phoneActions: {
     flexDirection: 'row',

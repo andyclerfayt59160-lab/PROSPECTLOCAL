@@ -459,6 +459,9 @@ async def compute_scan_result_metrics(scan_id: str, include_inexploitable: bool 
             if has_phone:
                 web_phones_found += 1
 
+        if business.get("exclude_from_visites") or business.get("domiciliation_address"):
+            continue
+
         if not has_phone:
             visite_terrain_count += 1
         elif has_siret:
@@ -2586,12 +2589,20 @@ async def get_visites_prospection(
                 "scan_id": {"$in": scan_ids},
                 "address": {"$nin": [None, ""]},
                 "is_duplicate": {"$ne": True},
-                "$or": [
-                    {"is_inexploitable": {"$ne": True}},
-                    {"is_inexploitable": {"$exists": False}}
-                ],
                 "status": {"$ne": "inexploitable"},
                 "$and": [
+                    {
+                        "$or": [
+                            {"is_inexploitable": {"$ne": True}},
+                            {"is_inexploitable": {"$exists": False}}
+                        ]
+                    },
+                    {
+                        "$or": [
+                            {"exclude_from_visites": {"$ne": True}},
+                            {"exclude_from_visites": {"$exists": False}}
+                        ]
+                    },
                     {
                         "$or": [
                             {"lead_type": "visite_terrain"},
@@ -2823,7 +2834,7 @@ async def mark_business_address_as_domiciliation(
     business_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Ban an address used as a domiciliation so it no longer feeds terrain visits."""
+    """Flag an address as domiciliation so it no longer feeds terrain visits."""
     business = await find_user_business_by_id(current_user["sub"], business_id)
     if not business:
         raise HTTPException(status_code=404, detail="Business not found")
@@ -2860,9 +2871,11 @@ async def mark_business_address_as_domiciliation(
             "$set": {
                 "domiciliation_signature": signature,
                 "domiciliation_address": True,
-                "is_inexploitable": True,
-                "status": "domiciliation_address",
+                "exclude_from_visites": True,
+                "visite_exclusion_reason": "domiciliation_address",
                 "lead_type": "standard",
+                "phone_unreachable": False,
+                "manual_visite_terrain": False,
                 "domiciliation_marked_at": timestamp,
                 "domiciliation_marked_by": current_user["sub"],
             }
@@ -2880,9 +2893,11 @@ async def mark_business_address_as_domiciliation(
                 "$set": {
                     "domiciliation_signature": signature,
                     "domiciliation_address": True,
-                    "is_inexploitable": True,
-                    "status": "domiciliation_address",
+                    "exclude_from_visites": True,
+                    "visite_exclusion_reason": "domiciliation_address",
                     "lead_type": "standard",
+                    "phone_unreachable": False,
+                    "manual_visite_terrain": False,
                     "domiciliation_marked_at": timestamp,
                     "domiciliation_marked_by": current_user["sub"],
                 }
@@ -4120,6 +4135,7 @@ async def export_visites_to_csv(
             "scan_id": {"$in": scan_ids},
             "source": "pappers",
             "is_duplicate": {"$ne": True},
+            "exclude_from_visites": {"$ne": True},
             "$or": [
                 {"phone": {"$in": [None, ""]}},
                 {"lead_type": "visite_terrain"}
@@ -4130,6 +4146,7 @@ async def export_visites_to_csv(
             "scan_id": {"$in": scan_ids},
             "source": {"$ne": "pappers"},
             "is_duplicate": {"$ne": True},
+            "exclude_from_visites": {"$ne": True},
             "$or": [
                 {"lead_type": "visite_terrain"},
                 {"phone": {"$in": [None, ""]}, "address": {"$ne": None}}
@@ -4139,6 +4156,7 @@ async def export_visites_to_csv(
         query = {
             "scan_id": {"$in": scan_ids},
             "is_duplicate": {"$ne": True},
+            "exclude_from_visites": {"$ne": True},
             "$or": [
                 {"source": "pappers", "phone": {"$in": [None, ""]}},
                 {"source": "pappers", "lead_type": "visite_terrain"},
@@ -6364,9 +6382,11 @@ async def _apply_domiciliation_rules_to_business_dict(business_dict: dict) -> bo
         return False
 
     business_dict["domiciliation_address"] = True
-    business_dict["is_inexploitable"] = True
-    business_dict["status"] = "domiciliation_address"
+    business_dict["exclude_from_visites"] = True
+    business_dict["visite_exclusion_reason"] = "domiciliation_address"
     business_dict["lead_type"] = "standard"
+    business_dict["phone_unreachable"] = False
+    business_dict["manual_visite_terrain"] = False
     business_dict["domiciliation_marked_at"] = banned_address.get("created_at")
     business_dict["domiciliation_marked_by"] = banned_address.get("created_by")
     business_dict["domiciliation_reason"] = "Adresse bannie comme domiciliation"

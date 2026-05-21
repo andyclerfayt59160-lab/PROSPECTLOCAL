@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, View, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import SourceIndicator from '../SourceIndicator';
 
@@ -8,10 +8,12 @@ type Props = {
   styles: any;
   copiedField: string | null;
   shouldShowManualVisiteBadge: boolean;
+  markingDomiciliation: boolean;
   openExternalLink: (url: string) => void;
   copyToClipboard: (text: string, fieldName: string) => void;
   onCallPhone: (phone: string) => void;
   onMoveToVisite: () => void;
+  onMarkDomiciliation: () => void;
 };
 
 export default function BusinessContactCard({
@@ -19,10 +21,12 @@ export default function BusinessContactCard({
   styles,
   copiedField,
   shouldShowManualVisiteBadge,
+  markingDomiciliation,
   openExternalLink,
   copyToClipboard,
   onCallPhone,
   onMoveToVisite,
+  onMarkDomiciliation,
 }: Props) {
   return (
     <View style={styles.section}>
@@ -38,23 +42,51 @@ export default function BusinessContactCard({
       )}
 
       {business.address && (
-        <View style={styles.contactRow}>
-          <Ionicons name="location-outline" size={24} color="#6366F1" />
-          <View style={styles.contactContent}>
-            <View style={styles.contactLabelRow}>
-              <Text style={styles.contactLabel}>Adresse</Text>
-              <SourceIndicator sourceInfo={business.data_sources?.address} />
+        <View style={styles.addressBlock}>
+          <View style={styles.contactRow}>
+            <Ionicons name="location-outline" size={24} color="#6366F1" />
+            <View style={styles.contactContent}>
+              <View style={styles.contactLabelRow}>
+                <Text style={styles.contactLabel}>Adresse</Text>
+                <SourceIndicator sourceInfo={business.data_sources?.address} />
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  const query = encodeURIComponent(business.address);
+                  openExternalLink(`https://www.google.com/maps/search/?api=1&query=${query}`);
+                }}
+              >
+                <Text style={styles.contactValue}>{business.address}</Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity
-              onPress={() => {
-                const query = encodeURIComponent(business.address);
-                openExternalLink(`https://www.google.com/maps/search/?api=1&query=${query}`);
-              }}
-            >
-              <Text style={styles.contactValue}>{business.address}</Text>
-            </TouchableOpacity>
+            <Ionicons name="chevron-forward" size={20} color="#999" />
           </View>
-          <Ionicons name="chevron-forward" size={20} color="#999" />
+
+          {business.domiciliation_address ? (
+            <View style={styles.domiciliationInlineBadge}>
+              <Ionicons name="business-outline" size={16} color="#B45309" />
+              <Text style={styles.domiciliationInlineBadgeText}>
+                Adresse taguée comme domiciliation : exclue des visites terrain futures
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.domiciliationInlineButton, markingDomiciliation && styles.domiciliationInlineButtonDisabled]}
+              onPress={onMarkDomiciliation}
+              disabled={markingDomiciliation}
+            >
+              {markingDomiciliation ? (
+                <ActivityIndicator size="small" color="#B45309" />
+              ) : (
+                <>
+                  <Ionicons name="business-outline" size={16} color="#B45309" />
+                  <Text style={styles.domiciliationInlineButtonText}>
+                    Taguer cette adresse en domiciliation
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -140,7 +172,7 @@ export default function BusinessContactCard({
         </View>
       )}
 
-      {business.phone && business.lead_type !== 'visite_terrain' && (
+      {business.phone && business.lead_type !== 'visite_terrain' && !business.domiciliation_address && (
         <TouchableOpacity
           style={styles.moveToVisiteBtn}
           onPress={onMoveToVisite}

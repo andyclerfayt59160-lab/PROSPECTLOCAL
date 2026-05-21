@@ -67,6 +67,74 @@ interface ActionBriefState {
   };
 }
 
+const ACTION_BRIEF_ALL_LOCALITIES_KEY = '__all_localities__';
+const ACTION_BRIEF_UNKNOWN_LOCALITY_KEY = '__unknown_locality__';
+
+interface ActionBriefLocalityOption {
+  key: string;
+  label: string;
+  count: number;
+}
+
+const normalizeActionBriefLocality = (value?: string) => (value || '').trim();
+
+const getActionBriefLocalityKey = (value?: string) => {
+  const normalized = normalizeActionBriefLocality(value);
+  return normalized ? normalized.toLowerCase() : ACTION_BRIEF_UNKNOWN_LOCALITY_KEY;
+};
+
+const buildActionBriefLocalityOptions = (brief: ActionBriefState): ActionBriefLocalityOption[] => {
+  const items = [...(brief.now.items || []), ...(brief.tomorrow.items || [])];
+  const counts = new Map<string, ActionBriefLocalityOption>();
+
+  for (const item of items) {
+    const locality = normalizeActionBriefLocality(item.city);
+    const key = getActionBriefLocalityKey(item.city);
+    const label = locality || 'Sans localite';
+    const existing = counts.get(key);
+
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+
+    counts.set(key, { key, label, count: 1 });
+  }
+
+  const ordered = Array.from(counts.values()).sort((a, b) => {
+    if (a.key === ACTION_BRIEF_UNKNOWN_LOCALITY_KEY) return 1;
+    if (b.key === ACTION_BRIEF_UNKNOWN_LOCALITY_KEY) return -1;
+    return a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' });
+  });
+
+  return [
+    {
+      key: ACTION_BRIEF_ALL_LOCALITIES_KEY,
+      label: 'Toutes localites',
+      count: items.length,
+    },
+    ...ordered,
+  ];
+};
+
+const sortActionBriefItemsByLocality = (items: ActionBriefItem[]) =>
+  [...items].sort((a, b) => {
+    const cityA = normalizeActionBriefLocality(a.city) || 'zzzz';
+    const cityB = normalizeActionBriefLocality(b.city) || 'zzzz';
+    const cityCompare = cityA.localeCompare(cityB, 'fr', { sensitivity: 'base' });
+    if (cityCompare !== 0) return cityCompare;
+    return (a.business_name || '').localeCompare(b.business_name || '', 'fr', { sensitivity: 'base' });
+  });
+
+const filterActionBriefItemsByLocality = (items: ActionBriefItem[], localityKey: string) => {
+  const sortedItems = sortActionBriefItemsByLocality(items);
+  if (localityKey === ACTION_BRIEF_ALL_LOCALITIES_KEY) {
+    return sortedItems;
+  }
+
+  return sortedItems.filter((item) => getActionBriefLocalityKey(item.city) === localityKey);
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -80,6 +148,9 @@ export default function HomeScreen() {
   });
   const [showNotifications, setShowNotifications] = useState(false);
   const [copiedPhoneKey, setCopiedPhoneKey] = useState<string | null>(null);
+  const [selectedActionBriefLocalityKey, setSelectedActionBriefLocalityKey] = useState(
+    ACTION_BRIEF_ALL_LOCALITIES_KEY
+  );
   const [pulseAnim] = useState(new Animated.Value(1));
   const [cockpitStats, setCockpitStats] = useState<DailyCockpitStats>({
     aTraiter: 0,
@@ -108,6 +179,16 @@ export default function HomeScreen() {
     refreshNotifications 
   } = useScan();
 
+  const actionBriefLocalityOptions = buildActionBriefLocalityOptions(actionBrief);
+  const filteredNowItems = filterActionBriefItemsByLocality(
+    actionBrief.now.items || [],
+    selectedActionBriefLocalityKey
+  );
+  const filteredTomorrowItems = filterActionBriefItemsByLocality(
+    actionBrief.tomorrow.items || [],
+    selectedActionBriefLocalityKey
+  );
+
   useEffect(() => {
     checkAuth();
     // Refresh notifications au montage du composant
@@ -127,6 +208,15 @@ export default function HomeScreen() {
       return () => pulse.stop();
     }
   }, [activeScans.length]);
+
+  useEffect(() => {
+    if (
+      selectedActionBriefLocalityKey !== ACTION_BRIEF_ALL_LOCALITIES_KEY &&
+      !actionBriefLocalityOptions.some((option) => option.key === selectedActionBriefLocalityKey)
+    ) {
+      setSelectedActionBriefLocalityKey(ACTION_BRIEF_ALL_LOCALITIES_KEY);
+    }
+  }, [actionBriefLocalityOptions, selectedActionBriefLocalityKey]);
 
   const checkAuth = async () => {
     const token = await AsyncStorage.getItem('token');
@@ -483,12 +573,51 @@ export default function HomeScreen() {
           <Text style={styles.prioritySectionSubtitle}>
             Les prochaines actions les plus utiles proposees automatiquement.
           </Text>
-          {actionBrief.now.items.length > 0 ? (
-            actionBrief.now.items.map((item) => (
+          {actionBriefLocalityOptions.length > 1 && (
+            <View style={styles.localityFilterWrap}>
+              <Text style={styles.localityFilterLabel}>Filtrer par localite</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.localityFilterRow}
+              >
+                {actionBriefLocalityOptions.map((option) => {
+                  const isActive = option.key === selectedActionBriefLocalityKey;
+                  return (
+                    <TouchableOpacity
+                      key={option.key}
+                      style={[styles.localityChip, isActive && styles.localityChipActive]}
+                      onPress={() => setSelectedActionBriefLocalityKey(option.key)}
+                    >
+                      <Text style={[styles.localityChipText, isActive && styles.localityChipTextActive]}>
+                        {option.label}
+                      </Text>
+                      <View style={[styles.localityChipCount, isActive && styles.localityChipCountActive]}>
+                        <Text style={[styles.localityChipCountText, isActive && styles.localityChipCountTextActive]}>
+                          {option.count}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+          {filteredNowItems.length > 0 ? (
+            filteredNowItems.map((item, index) => (
               <View
                 key={`${item.source}-${item.business_id}`}
                 style={styles.priorityCard}
               >
+                {(index === 0 ||
+                  getActionBriefLocalityKey(filteredNowItems[index - 1]?.city) !== getActionBriefLocalityKey(item.city)) && (
+                  <View style={styles.localitySectionBadge}>
+                    <Ionicons name="location-outline" size={14} color="#4F46E5" />
+                    <Text style={styles.localitySectionBadgeText}>
+                      {normalizeActionBriefLocality(item.city) || 'Sans localite'}
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.priorityCardHeader}>
                   <View style={styles.priorityTitleWrap}>
                     <Text style={styles.priorityBusinessName}>
@@ -631,14 +760,23 @@ export default function HomeScreen() {
               <Text style={styles.tomorrowLabel}>Directs fragiles</Text>
             </TouchableOpacity>
           </View>
-          {actionBrief.tomorrow.items.length > 0 && (
+          {filteredTomorrowItems.length > 0 && (
             <View style={styles.tomorrowList}>
-              {actionBrief.tomorrow.items.map((item) => (
+              {filteredTomorrowItems.map((item, index) => (
                 <View
                   key={`tomorrow-${item.source}-${item.business_id}`}
                   style={styles.tomorrowListItem}
                 >
                   <View style={styles.tomorrowListText}>
+                    {(index === 0 ||
+                      getActionBriefLocalityKey(filteredTomorrowItems[index - 1]?.city) !== getActionBriefLocalityKey(item.city)) && (
+                      <View style={styles.localitySectionBadge}>
+                        <Ionicons name="location-outline" size={14} color="#4F46E5" />
+                        <Text style={styles.localitySectionBadgeText}>
+                          {normalizeActionBriefLocality(item.city) || 'Sans localite'}
+                        </Text>
+                      </View>
+                    )}
                     <Text style={styles.tomorrowListTitle}>
                       {item.business_name}
                       {item.pl_reference ? ` - ${item.pl_reference}` : ''}
@@ -1285,6 +1423,75 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#64748B',
     lineHeight: 19,
+  },
+  localityFilterWrap: {
+    gap: 8,
+  },
+  localityFilterLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  localityFilterRow: {
+    gap: 8,
+    paddingRight: 12,
+  },
+  localityChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  localityChipActive: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#4F46E5',
+  },
+  localityChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4338CA',
+  },
+  localityChipTextActive: {
+    color: '#FFF',
+  },
+  localityChipCount: {
+    minWidth: 22,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: '#E0E7FF',
+    alignItems: 'center',
+  },
+  localityChipCountActive: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  localityChipCountText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#4338CA',
+  },
+  localityChipCountTextActive: {
+    color: '#FFF',
+  },
+  localitySectionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#EEF2FF',
+  },
+  localitySectionBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#4338CA',
   },
   priorityCard: {
     backgroundColor: '#F8FAFC',

@@ -243,8 +243,11 @@ export default function VisiteDetailScreen() {
       setBusiness((prev: any) => ({
         ...prev,
         domiciliation_address: true,
-        is_inexploitable: true,
-        status: 'domiciliation_address',
+        exclude_from_visites: true,
+        visite_exclusion_reason: 'domiciliation_address',
+        lead_type: prev?.lead_type === 'visite_terrain' ? 'standard' : prev?.lead_type,
+        phone_unreachable: false,
+        manual_visite_terrain: false,
       }));
 
       const updatedBusinesses = response.data?.updated_businesses ?? 1;
