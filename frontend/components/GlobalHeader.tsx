@@ -46,11 +46,24 @@ function formatTimeAgo(dateString: string) {
   return `Il y a ${Math.floor(diff / 86400)}j`;
 }
 
+function getNotificationTarget(notification: any) {
+  const scanId = notification?.scan_id || notification?.data?.scan_id;
+  const businessId = notification?.business_id || notification?.data?.business_id;
+
+  if (scanId) {
+    return `/results?scanId=${scanId}`;
+  }
+  if (businessId) {
+    return `/businessdetail?businessId=${businessId}`;
+  }
+  return null;
+}
+
 export default function GlobalHeader({ title, showBack, onBack, rightComponent }: GlobalHeaderProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [showNotifications, setShowNotifications] = useState(false);
-  const { activeScans, notifications, unreadCount, markAllRead } = useScan();
+  const { activeScans, notifications, unreadCount, markAllRead, markNotificationRead } = useScan();
 
   const resolvedTitle = useMemo(() => {
     if (title) return title;
@@ -71,7 +84,11 @@ export default function GlobalHeader({ title, showBack, onBack, rightComponent }
           <View>
             <Text style={styles.title}>{resolvedTitle}</Text>
             {activeScans.length > 0 ? (
-              <Text style={styles.subtitle}>{activeScans.length} scan(s) en cours</Text>
+              <Text style={styles.subtitle}>
+                {activeScans[0]?.progress_message
+                  ? `${activeScans[0].progress_message}${typeof activeScans[0]?.progress === 'number' ? ` (${activeScans[0].progress}%)` : ''}`
+                  : `${activeScans.length} scan(s) en cours`}
+              </Text>
             ) : (
               <Text style={styles.subtitle}>Prospection locale intelligente</Text>
             )}
@@ -113,11 +130,26 @@ export default function GlobalHeader({ title, showBack, onBack, rightComponent }
                 <Text style={styles.emptyText}>Aucune notification pour le moment.</Text>
               ) : (
                 notifications.map((notification) => (
-                  <View key={notification.id} style={[styles.notificationItem, !notification.is_read && styles.unread]}>
+                  <TouchableOpacity
+                    key={notification.id}
+                    style={[styles.notificationItem, !notification.is_read && styles.unread]}
+                    activeOpacity={0.8}
+                    onPress={async () => {
+                      if (!notification.is_read) {
+                        await markNotificationRead(notification.id);
+                      }
+                      const target = getNotificationTarget(notification);
+                      if (!target) {
+                        return;
+                      }
+                      setShowNotifications(false);
+                      router.push(target as any);
+                    }}
+                  >
                     <Text style={styles.notificationTitle}>{notification.title}</Text>
                     <Text style={styles.notificationMessage}>{notification.message}</Text>
                     <Text style={styles.notificationTime}>{formatTimeAgo(notification.created_at)}</Text>
-                  </View>
+                  </TouchableOpacity>
                 ))
               )}
             </ScrollView>

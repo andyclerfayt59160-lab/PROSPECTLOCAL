@@ -135,6 +135,19 @@ const filterActionBriefItemsByLocality = (items: ActionBriefItem[], localityKey:
   return sortedItems.filter((item) => getActionBriefLocalityKey(item.city) === localityKey);
 };
 
+const getNotificationTarget = (notification: any) => {
+  const scanId = notification?.scan_id || notification?.data?.scan_id;
+  const businessId = notification?.business_id || notification?.data?.business_id;
+
+  if (scanId) {
+    return `/results?scanId=${scanId}`;
+  }
+  if (businessId) {
+    return `/businessdetail?businessId=${businessId}`;
+  }
+  return null;
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
@@ -440,7 +453,11 @@ export default function HomeScreen() {
           {isScanning && (
             <Animated.View style={[styles.scanningBadge, { transform: [{ scale: pulseAnim }] }]}>
               <View style={styles.scanningDot} />
-              <Text style={styles.scanningText}>Scan en cours...</Text>
+              <Text style={styles.scanningText}>
+                {activeScans[0]?.progress_message
+                  ? `${activeScans[0].progress_message}${typeof activeScans[0]?.progress === 'number' ? ` (${activeScans[0].progress}%)` : ''}`
+                  : 'Scan en cours...'}
+              </Text>
             </Animated.View>
           )}
           
@@ -1048,10 +1065,10 @@ export default function HomeScreen() {
                     key={notif.id} 
                     style={[styles.notificationItem, !notif.is_read && styles.notificationUnread]}
                     onPress={() => {
-                      if (notif.data?.scan_id) {
-                        setShowNotifications(false);
-                        router.push(`/results?scanId=${notif.data.scan_id}`);
-                      }
+                      const target = getNotificationTarget(notif);
+                      if (!target) return;
+                      setShowNotifications(false);
+                      router.push(target as any);
                     }}
                   >
                     <View style={styles.notificationIcon}>

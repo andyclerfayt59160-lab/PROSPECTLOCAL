@@ -4697,14 +4697,30 @@ async def rescan_all_scans(current_user: dict = Depends(get_current_user)):
 # Codes NAF prioritaires par domaine (les plus pertinents en premier)
 # Optimisé pour réduire la consommation de crédits Pappers
 DOMAIN_NAF_CODES = {
-    "HABITAT": ["43.22A", "43.22B", "43.21A", "43.11Z", "43.12A", "43.31Z", "43.32A", "43.33Z", "43.34Z", "43.91A"],  # Top 10 BTP
-    "COMMERCE": ["47.11A", "47.11B", "47.21Z", "47.73Z", "47.75Z", "47.76Z", "47.77Z"],  # Commerce de détail prioritaire
-    "RESTAURATION": ["56.10A", "56.10B", "56.10C", "56.21Z", "56.30Z"],  # Restaurants principaux
-    "BEAUTE": ["96.02A", "96.02B", "96.04Z", "96.09Z"],  # Tous (peu de codes)
-    "AUTO": ["45.20A", "45.20B", "45.32Z", "45.40Z"],  # Garage/réparation auto
-    "SANTE": ["86.21Z", "86.22A", "86.22B", "86.23Z", "86.90A", "86.90D"],  # Médecins/dentistes/kiné
-    "B2B": ["69.10Z", "69.20Z", "70.22Z", "71.11Z", "73.11Z", "74.10Z"],  # Conseil/archi/pub
-    "AUTRE": ["96.01A", "96.01B", "95.23Z", "74.20Z"],  # Services divers
+    "HABITAT": [
+        "41.20A", "41.20B",
+        "43.11Z", "43.12A", "43.12B", "43.13Z",
+        "43.21A", "43.21B",
+        "43.22A", "43.22B",
+        "43.29A", "43.29B",
+        "43.31Z", "43.32A", "43.32B", "43.32C", "43.33Z", "43.34Z", "43.39Z",
+        "43.91A", "43.91B", "43.99A", "43.99B", "43.99C", "43.99D",
+        "47.52A", "47.52B", "47.53Z",
+        "71.20B",
+        "81.29A", "81.30Z",
+        "95.22Z",
+    ],
+    "COMMERCE": [
+        "47.11A", "47.11B", "47.11C", "47.11D", "47.11E", "47.11F", "47.19A", "47.19B",
+        "47.21Z", "47.22Z", "47.23Z", "47.24Z", "47.25Z", "47.26Z",
+        "47.71Z", "47.72A", "47.72B", "47.73Z", "47.75Z", "47.76Z", "47.77Z", "47.78A",
+    ],
+    "RESTAURATION": ["56.10A", "56.10B", "56.10C", "56.21Z", "56.29A", "56.29B", "56.30Z"],
+    "BEAUTE": ["96.02A", "96.02B", "96.04Z", "96.09Z"],
+    "AUTO": ["45.11Z", "45.19Z", "45.20A", "45.20B", "45.31Z", "45.32Z", "45.40Z", "52.21Z", "71.20A", "85.53Z"],
+    "SANTE": ["75.00Z", "86.10Z", "86.21Z", "86.22A", "86.22B", "86.22C", "86.23Z", "86.90A", "86.90B", "86.90C", "86.90D", "86.90E", "86.90F"],
+    "B2B": ["68.31Z", "69.10Z", "69.20Z", "70.10Z", "70.21Z", "70.22Z", "71.11Z", "71.12A", "71.12B", "71.20A", "71.20B", "73.11Z", "73.12Z", "74.10Z", "80.10Z", "81.21Z", "81.22Z", "81.29A", "81.29B"],
+    "AUTRE": ["47.76Z", "49.42Z", "74.20Z", "75.00Z", "81.29A", "81.30Z", "85.51Z", "93.11Z", "93.12Z", "93.13Z", "93.19Z", "95.22Z", "96.01A", "96.01B", "96.03Z", "96.04Z"],
 }
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -5683,6 +5699,10 @@ async def web_scan(
 
     logger.info(f"[WEB] Starting Web Scan: '{effective_query_label}' in {request.location}")
 
+    search_step_count = max(len(plan["base_queries"]), 1)
+    processing_step_budget = max(request.max_results, 1)
+    progress_total_steps = search_step_count + processing_step_budget
+
     # Create scan record
     scan_id = str(uuid.uuid4())
     scan_record = {
@@ -5710,6 +5730,11 @@ async def web_scan(
         "resolved_families": plan["resolved_families"],
         "selected_activity_labels": plan["selected_activity_labels"],
         "serper_requests_estimated": plan["estimated_serper_credits"],
+        "progress": 0,
+        "progress_message": "Preparation du scan Internet...",
+        "progress_step": 0,
+        "progress_total_steps": progress_total_steps,
+        "last_progress_at": datetime.utcnow(),
         "scan_diagnostics": {
             "search_queries_count": len(plan["base_queries"]),
             "source_queries_per_search": plan["source_query_count"],
@@ -5718,6 +5743,22 @@ async def web_scan(
         },
     }
     await db.scans.insert_one(scan_record)
+
+    async def update_web_scan_progress(step: int, message: str) -> None:
+        bounded_step = max(0, min(step, progress_total_steps))
+        progress_value = min(int((bounded_step / progress_total_steps) * 100), 99)
+        await db.scans.update_one(
+            {"id": scan_id},
+            {
+                "$set": {
+                    "progress": progress_value,
+                    "progress_message": message,
+                    "progress_step": bounded_step,
+                    "progress_total_steps": progress_total_steps,
+                    "last_progress_at": datetime.utcnow(),
+                }
+            },
+        )
 
     web_businesses: List[Dict[str, Any]] = []
     seen_web_businesses = set()
@@ -5728,7 +5769,11 @@ async def web_scan(
         else max(8, min(20, math.ceil(request.max_results / min(len(plan["base_queries"]), 6))))
     )
 
-    for base_query in plan["base_queries"]:
+    for query_index, base_query in enumerate(plan["base_queries"], start=1):
+        await update_web_scan_progress(
+            query_index - 1,
+            f"Recherche web {query_index}/{search_step_count} en cours...",
+        )
         remaining_results = max(0, request.max_results - len(web_businesses))
         if remaining_results <= 0:
             break
@@ -5758,6 +5803,11 @@ async def web_scan(
             if len(web_businesses) >= request.max_results:
                 break
 
+        await update_web_scan_progress(
+            query_index,
+            f"Recherche web {query_index}/{search_step_count} terminee...",
+        )
+
     if actual_requests_used > 0:
         await track_api_usage(
             user_id=user_id,
@@ -5768,13 +5818,18 @@ async def web_scan(
         )
 
     logger.info(f"[SEARCH] Found {len(web_businesses)} potential businesses from web search")
+    await update_web_scan_progress(
+        search_step_count,
+        f"Analyse de {len(web_businesses)} fiches detectees...",
+    )
     
     # Process and save businesses
     total_found = 0
     leads_with_phone = 0
     leads_without_phone = 0
-    
-    for web_biz in web_businesses:
+
+    total_web_businesses = len(web_businesses)
+    for business_index, web_biz in enumerate(web_businesses, start=1):
         try:
             # Generate unique ID
             business_id = str(uuid.uuid4())
@@ -5846,12 +5901,31 @@ async def web_scan(
         except Exception as e:
             logger.error(f"Error processing web business: {e}")
             continue
+
+        if (
+            total_web_businesses
+            and (
+                business_index == 1
+                or business_index == total_web_businesses
+                or business_index % 5 == 0
+            )
+        ):
+            await update_web_scan_progress(
+                search_step_count + min(business_index, processing_step_budget),
+                f"Qualification des fiches {business_index}/{total_web_businesses}...",
+            )
     
     # Update scan status
     await db.scans.update_one(
         {"id": scan_id},
         {"$set": {
             "status": "done",
+            "completed_at": datetime.utcnow(),
+            "progress": 100,
+            "progress_message": f"Termine ! {total_found} entreprises trouvees",
+            "progress_step": progress_total_steps,
+            "progress_total_steps": progress_total_steps,
+            "last_progress_at": datetime.utcnow(),
             "total_results": total_found,
             "leads_with_phone": leads_with_phone,
             "leads_without_phone": leads_without_phone,
@@ -5869,43 +5943,48 @@ async def web_scan(
     )
     
     # Create notification
-    if total_found > 0:
-        notification = {
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "type": "scan_complete",
-            "title": f"[WEB] Scan Internet termine - {total_found} entreprises",
-            "message": f"{leads_with_phone} avec téléphone, {leads_without_phone} à enrichir",
-            "data": {
-                "scan_id": scan_id,
-                "total": total_found,
-                "with_phone": leads_with_phone
-            },
-            "is_read": False,
-            "created_at": datetime.utcnow()
-        }
-        await db.notifications.insert_one(notification)
+    notification_message = (
+        f"{leads_with_phone} avec telephone, {leads_without_phone} a enrichir"
+        if total_found > 0
+        else "Aucun resultat exploitable detecte pour ce cadrage"
+    )
+    notification = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "type": "scan_complete",
+        "title": f"[WEB] Scan Internet termine - {total_found} entreprise{'s' if total_found != 1 else ''}",
+        "message": notification_message,
+        "scan_id": scan_id,
+        "data": {
+            "scan_id": scan_id,
+            "total": total_found,
+            "with_phone": leads_with_phone,
+        },
+        "is_read": False,
+        "created_at": datetime.utcnow()
+    }
+    await db.notifications.insert_one(notification)
         
         # Send email notification if user has it enabled
-        try:
-            user = await db.users.find_one({"id": user_id})
-            if user and user.get("email"):
-                prefs = await get_user_email_preferences(db, user_id)
-                if prefs.get("scan_complete", True):
-                    await send_scan_complete_email(
-                        db=db,
-                        user_email=user["email"],
-                        scan_name=effective_query_label,
-                        scan_type="internet",
-                        total_results=total_found,
-                        verified_count=leads_with_phone,
-                        with_phone=leads_with_phone,
-                        with_email=0,  # Web scan doesn't track emails directly
-                        scan_id=scan_id
-                    )
-                    logger.info(f"[MAIL] Scan complete email sent to {user['email']}")
-        except Exception as email_error:
-            logger.error(f"Failed to send scan complete email: {email_error}")
+    try:
+        user = await db.users.find_one({"id": user_id})
+        if user and user.get("email"):
+            prefs = await get_user_email_preferences(db, user_id)
+            if prefs.get("scan_complete", True):
+                await send_scan_complete_email(
+                    db=db,
+                    user_email=user["email"],
+                    scan_name=effective_query_label,
+                    scan_type="internet",
+                    total_results=total_found,
+                    verified_count=leads_with_phone,
+                    with_phone=leads_with_phone,
+                    with_email=0,  # Web scan doesn't track emails directly
+                    scan_id=scan_id
+                )
+                logger.info(f"[MAIL] Scan complete email sent to {user['email']}")
+    except Exception as email_error:
+        logger.error(f"Failed to send scan complete email: {email_error}")
     
     logger.info(f"[DONE] Web scan complete: {total_found} businesses found")
     

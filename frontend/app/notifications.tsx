@@ -100,11 +100,14 @@ export default function NotificationsScreen() {
       await markAsRead(notification.id);
     }
 
+    const scanId = notification.scan_id || notification.data?.scan_id;
+    const businessId = notification.business_id || notification.data?.business_id;
+
     // Navigate based on notification type
-    if (notification.scan_id) {
-      router.push(`/results?scanId=${notification.scan_id}`);
-    } else if (notification.business_id) {
-      router.push(`/businessdetail?businessId=${notification.business_id}`);
+    if (scanId) {
+      router.push(`/results?scanId=${scanId}`);
+    } else if (businessId) {
+      router.push(`/businessdetail?businessId=${businessId}`);
     }
   };
 

@@ -19,6 +19,7 @@ import axios from 'axios';
 import { handleAuthError, checkAuth } from '../utils/authHelpers';
 
 import { API_URL } from '../utils/api';
+import { useScan } from '../context/ScanContext';
 
 interface Scan {
   id: string;
@@ -49,6 +50,11 @@ interface Scan {
   include_facebook?: boolean;
   include_linkedin?: boolean;
   include_websites?: boolean;
+  completed_at?: string;
+  progress?: number;
+  progress_message?: string;
+  progress_step?: number;
+  progress_total_steps?: number;
 }
 
 type ScanHistoryVerdict = {
@@ -57,6 +63,82 @@ type ScanHistoryVerdict = {
   backgroundColor: string;
   summary: string;
   cost: string;
+};
+
+type ScanStatusPresentation = {
+  label: string;
+  color: string;
+  backgroundColor: string;
+};
+
+const formatScanDateTime = (dateString?: string) => {
+  if (!dateString) return 'Heure inconnue';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return 'Heure inconnue';
+  return date.toLocaleString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const getScanStatusPresentation = (scan: Scan): ScanStatusPresentation => {
+  const normalizedStatus = (scan.status || '').toLowerCase();
+
+  if (normalizedStatus === 'processing') {
+    return {
+      label: typeof scan.progress === 'number' ? `En cours (${scan.progress}%)` : 'En cours',
+      color: '#1D4ED8',
+      backgroundColor: '#DBEAFE',
+    };
+  }
+  if (normalizedStatus === 'done') {
+    return {
+      label: 'Termine',
+      color: '#047857',
+      backgroundColor: '#D1FAE5',
+    };
+  }
+  if (normalizedStatus === 'failed') {
+    return {
+      label: 'Interrompu',
+      color: '#B91C1C',
+      backgroundColor: '#FEE2E2',
+    };
+  }
+  return {
+    label: scan.status || 'Statut inconnu',
+    color: '#475569',
+    backgroundColor: '#E2E8F0',
+  };
+};
+
+const buildScanTimelineLabel = (scan: Scan) => {
+  if ((scan.status || '').toLowerCase() === 'done' && scan.completed_at) {
+    return `Termine le ${formatScanDateTime(scan.completed_at)}`;
+  }
+  return `Lance le ${formatScanDateTime(scan.created_at)}`;
+};
+
+const buildScanProgressLabel = (scan: Scan) => {
+  if ((scan.status || '').toLowerCase() !== 'processing') {
+    return null;
+  }
+
+  const message = scan.progress_message || 'Scan en cours...';
+  if (
+    typeof scan.progress_step === 'number' &&
+    typeof scan.progress_total_steps === 'number' &&
+    scan.progress_total_steps > 0
+  ) {
+    return `${message} (${scan.progress_step}/${scan.progress_total_steps})`;
+  }
+  if (typeof scan.progress === 'number') {
+    return `${message} (${scan.progress}%)`;
+  }
+  return message;
 };
 
 const buildWebHistoryVerdict = (scan: Scan): ScanHistoryVerdict => {
@@ -229,6 +311,7 @@ const inferWebScanDomainIds = (scan: Scan): string[] => {
 
 export default function ScanInternetScreen() {
   const router = useRouter();
+  const { activeScans } = useScan();
   const [scans, setScans] = useState<Scan[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -299,6 +382,10 @@ export default function ScanInternetScreen() {
     };
     init();
   }, []);
+
+  useEffect(() => {
+    loadScans();
+  }, [activeScans.length]);
 
   // City autocomplete
   useEffect(() => {
@@ -880,23 +967,14 @@ export default function ScanInternetScreen() {
     setShowNewScanModal(true);
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('fr-FR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
   const filteredScans = activeTab === 'favorites' 
     ? scans.filter(s => s.is_favorite) 
     : scans;
 
   const renderScanItem = ({ item }: { item: Scan }) => {
     const verdict = buildWebHistoryVerdict(item);
+    const status = getScanStatusPresentation(item);
+    const progressLabel = buildScanProgressLabel(item);
     return (
     <View style={styles.scanCard}>
       <View style={styles.scanHeader}>
@@ -905,7 +983,7 @@ export default function ScanInternetScreen() {
           <Text style={styles.scanLocation}>
             📍 {item.location_label} ({item.radius_km}km)
           </Text>
-          <Text style={styles.scanDate}>{formatDate(item.created_at)}</Text>
+          <Text style={styles.scanDate}>{buildScanTimelineLabel(item)}</Text>
         </View>
         <View style={styles.scanStats}>
           <View style={styles.statBadge}>
@@ -920,6 +998,13 @@ export default function ScanInternetScreen() {
           )}
         </View>
       </View>
+
+      <View style={[styles.scanStatusBadge, { backgroundColor: status.backgroundColor }]}>
+        <Text style={[styles.scanStatusText, { color: status.color }]}>{status.label}</Text>
+      </View>
+      {progressLabel && (
+        <Text style={styles.scanProgressText}>{progressLabel}</Text>
+      )}
 
       <View style={[styles.scanVerdictBadge, { backgroundColor: verdict.backgroundColor }]}>
         <Text style={[styles.scanVerdictText, { color: verdict.color }]}>{verdict.label}</Text>
@@ -1347,6 +1432,23 @@ const styles = StyleSheet.create({
   scanDate: {
     fontSize: 12,
     color: '#999',
+  },
+  scanStatusBadge: {
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  scanStatusText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  scanProgressText: {
+    fontSize: 12,
+    color: '#1D4ED8',
+    fontWeight: '600',
+    marginBottom: 8,
   },
   scanVerdictBadge: {
     alignSelf: 'flex-start',

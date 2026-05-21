@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ProspectLocalLogo } from '../components/ProspectLocalLogo';
 import { useToast } from '../components/Toast';
+import { useScan } from '../context/ScanContext';
 
 import { API_URL } from '../utils/api';
 
@@ -97,11 +98,16 @@ interface ScanHistoryItem {
   search_mode?: 'radius' | 'multi' | 'department';
   activity_id?: string;
   created_at?: string;
+  completed_at?: string;
   result_count?: number;
   total_results?: number;
   web_enriched_count?: number;
   web_phones_found?: number;
   status?: string;
+  progress?: number;
+  progress_message?: string;
+  progress_step?: number;
+  progress_total_steps?: number;
   naf_codes_scanned?: number;
   naf_codes_searched?: number;
   naf_codes_available?: number;
@@ -147,6 +153,12 @@ interface PappersScanEstimate {
     will_exceed_budget: boolean;
   };
 }
+
+type ScanStatusPresentation = {
+  label: string;
+  color: string;
+  backgroundColor: string;
+};
 
 const formatCreditValue = (value?: number) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -199,6 +211,61 @@ const getHistoryCoverageLabel = (scan: ScanHistoryItem): string => {
   }
 
   return `${scannedNaf}/${Math.max(availableNaf, scannedNaf)} NAF - ${geoCounts.scanned}/${geoCounts.available} ${geoUnitLabel}`;
+};
+
+const getScanStatusPresentation = (scan: ScanHistoryItem): ScanStatusPresentation => {
+  const normalizedStatus = (scan.status || '').toLowerCase();
+
+  if (normalizedStatus === 'processing') {
+    return {
+      label: typeof scan.progress === 'number' ? `En cours (${scan.progress}%)` : 'En cours',
+      color: '#1D4ED8',
+      backgroundColor: '#DBEAFE',
+    };
+  }
+
+  if (normalizedStatus === 'done') {
+    return {
+      label: 'Termine',
+      color: '#047857',
+      backgroundColor: '#D1FAE5',
+    };
+  }
+
+  if (normalizedStatus === 'failed') {
+    return {
+      label: 'Interrompu',
+      color: '#B91C1C',
+      backgroundColor: '#FEE2E2',
+    };
+  }
+
+  return {
+    label: scan.status || 'Statut inconnu',
+    color: '#475569',
+    backgroundColor: '#E2E8F0',
+  };
+};
+
+const buildScanProgressLabel = (scan: ScanHistoryItem) => {
+  if ((scan.status || '').toLowerCase() !== 'processing') {
+    return null;
+  }
+
+  const message = scan.progress_message || 'Scan en cours...';
+  if (
+    typeof scan.progress_step === 'number' &&
+    typeof scan.progress_total_steps === 'number' &&
+    scan.progress_total_steps > 0
+  ) {
+    return `${message} (${scan.progress_step}/${scan.progress_total_steps})`;
+  }
+
+  if (typeof scan.progress === 'number') {
+    return `${message} (${scan.progress}%)`;
+  }
+
+  return message;
 };
 
 const getHistoryDiagnosticLabel = (scan: ScanHistoryItem): string => {
@@ -422,6 +489,7 @@ export default function PappersScanScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { showToast } = useToast();
+  const { activeScans } = useScan();
   const scrollViewRef = useRef<ScrollView | null>(null);
   const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
   const [citySearch, setCitySearch] = useState('');
@@ -437,6 +505,7 @@ export default function PappersScanScreen() {
   const [loadingEstimate, setLoadingEstimate] = useState(false);
   const [scanProgress, setScanProgress] = useState({ current: 0, total: 0, activity: '' });
   const [recentScans, setRecentScans] = useState<ScanHistoryItem[]>([]);
+  const [recentScansTotalCount, setRecentScansTotalCount] = useState(0);
   const [loadingRecentScans, setLoadingRecentScans] = useState(true);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [historySectionY, setHistorySectionY] = useState(0);
@@ -461,6 +530,13 @@ export default function PappersScanScreen() {
       ? `${getCityDisplayName(city)} (${getCityDepartmentCode(city)})`
       : getCityDisplayName(city)
   );
+
+  const activePappersScans = activeScans.filter(
+    (scan) =>
+      scan.scan_type === 'pappers_mass' ||
+      scan.scan_type === 'pappers' ||
+      scan.scan_type === 'pappers_plus'
+  ) as ScanHistoryItem[];
   const getSelectedLocationSummary = () => {
     if (selectedCities.length === 0) {
       return '';
@@ -553,6 +629,10 @@ export default function PappersScanScreen() {
   useEffect(() => {
     loadRecentScans();
   }, []);
+
+  useEffect(() => {
+    loadRecentScans();
+  }, [activePappersScans.length]);
 
   useEffect(() => {
     if (!params.editScanId) {
@@ -697,12 +777,13 @@ export default function PappersScanScreen() {
           scan.scan_type === 'pappers' ||
           scan.activity_id === 'pappers_mass_scan' ||
           scan.activity_id === 'pappers_nouvelles_creations'
-        )
-        .slice(0, 8);
+        );
 
+      setRecentScansTotalCount(pappersScans.length);
       setRecentScans(pappersScans);
     } catch (error) {
       console.error('Recent scans load error:', error);
+      setRecentScansTotalCount(0);
       setRecentScans([]);
     } finally {
       setLoadingRecentScans(false);
@@ -1418,8 +1499,8 @@ export default function PappersScanScreen() {
             <Text style={styles.quickHistoryText}>
               {loadingRecentScans
                 ? "Chargement de l'historique..."
-                : recentScans.length > 0
-                  ? `${recentScans.length} scan(s) Pappers récents disponibles`
+                : recentScansTotalCount > 0
+                  ? `${recentScansTotalCount} scan(s) Pappers disponible(s)`
                   : 'Aucun scan Pappers récent pour le moment'}
             </Text>
           </View>
@@ -1432,6 +1513,34 @@ export default function PappersScanScreen() {
             <Text style={styles.quickHistoryButtonText}>Voir les scans</Text>
           </TouchableOpacity>
         </View>
+
+        {activePappersScans.length > 0 && (
+          <View style={styles.activeScanCard}>
+            <View style={styles.activeScanHeader}>
+              <Ionicons name="pulse-outline" size={18} color="#2563EB" />
+              <Text style={styles.activeScanTitle}>Scan Pappers en cours</Text>
+            </View>
+            <Text style={styles.activeScanMeta}>
+              {activePappersScans[0]?.location_label || activePappersScans[0]?.query_label || 'Zone en cours'}
+            </Text>
+            <View style={styles.activeScanProgressRow}>
+              <View style={styles.activeScanProgressBar}>
+                <View
+                  style={[
+                    styles.activeScanProgressFill,
+                    { width: `${Math.max(8, Math.min(activePappersScans[0]?.progress || 0, 100))}%` },
+                  ]}
+                />
+              </View>
+              <Text style={styles.activeScanProgressValue}>
+                {typeof activePappersScans[0]?.progress === 'number' ? `${activePappersScans[0].progress}%` : '...'}
+              </Text>
+            </View>
+            <Text style={styles.activeScanProgressText}>
+              {buildScanProgressLabel(activePappersScans[0]) || activePappersScans[0]?.progress_message || 'Scan en cours...'}
+            </Text>
+          </View>
+        )}
 
         {/* Search Mode Toggle */}
         <View style={styles.section}>
@@ -1777,7 +1886,10 @@ export default function PappersScanScreen() {
         >
           <View style={styles.historyHeader}>
             <View style={styles.historyHeaderContent}>
-              <Text style={styles.sectionTitle}>Historique des scans Pappers</Text>
+              <Text style={styles.sectionTitle}>
+                Historique des scans Pappers
+                {recentScansTotalCount > 0 ? ` (${recentScansTotalCount})` : ''}
+              </Text>
               <Text style={styles.sectionSubtitle}>
                 Retrouve ton dernier scan ou ouvre un ancien résultat sans relancer une recherche.
               </Text>
@@ -1842,8 +1954,8 @@ export default function PappersScanScreen() {
                   <Text style={styles.historyCollapsedText}>
                     {loadingRecentScans
                       ? "Chargement de l'historique..."
-                      : recentScans.length > 0
-                        ? `${recentScans.length} scan(s) récent(s) consultables en un clic`
+                      : recentScansTotalCount > 0
+                        ? `${recentScansTotalCount} scan(s) consultable(s) en un clic`
                         : 'Aucun scan Pappers récent'}
                   </Text>
                 </View>
@@ -1872,6 +1984,11 @@ export default function PappersScanScreen() {
                   activeOpacity={0.85}
                   onPress={() => openScanResults(scan)}
                 >
+                  {(() => {
+                    const status = getScanStatusPresentation(scan);
+                    const progressLabel = buildScanProgressLabel(scan);
+                    return (
+                      <>
                   <View style={styles.historyCardTop}>
                     <View style={styles.historyBadge}>
                       <Text style={styles.historyBadgeText}>Pappers</Text>
@@ -1899,6 +2016,12 @@ export default function PappersScanScreen() {
                     <Text style={styles.historyCoverageText}>
                       {getHistoryDiagnosticLabel(scan)}
                     </Text>
+                  ) : null}
+                  <View style={[styles.historyStatusBadge, { backgroundColor: status.backgroundColor }]}>
+                    <Text style={[styles.historyStatusText, { color: status.color }]}>{status.label}</Text>
+                  </View>
+                  {progressLabel ? (
+                    <Text style={styles.historyProgressText}>{progressLabel}</Text>
                   ) : null}
 
                   <View
@@ -1958,6 +2081,9 @@ export default function PappersScanScreen() {
                       <Text style={styles.historyPrimaryActionText}>Voir les résultats</Text>
                     </TouchableOpacity>
                   </View>
+                      </>
+                    );
+                  })()}
                 </TouchableOpacity>
               ))}
             </View>
@@ -2278,6 +2404,60 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  activeScanCard: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    gap: 10,
+  },
+  activeScanHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  activeScanTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1E3A8A',
+  },
+  activeScanMeta: {
+    fontSize: 13,
+    color: '#1D4ED8',
+    fontWeight: '600',
+  },
+  activeScanProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  activeScanProgressBar: {
+    flex: 1,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: '#DBEAFE',
+    overflow: 'hidden',
+  },
+  activeScanProgressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#2563EB',
+  },
+  activeScanProgressValue: {
+    minWidth: 44,
+    textAlign: 'right',
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1D4ED8',
+  },
+  activeScanProgressText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#1E40AF',
+    fontWeight: '600',
+  },
   historySection: {
     marginTop: 8,
     marginBottom: 16,
@@ -2467,6 +2647,23 @@ const styles = StyleSheet.create({
     color: '#4F46E5',
     fontWeight: '600',
     marginTop: 6,
+  },
+  historyStatusBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 2,
+  },
+  historyStatusText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  historyProgressText: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#1D4ED8',
+    fontWeight: '600',
   },
   historyOutcomeBadge: {
     alignSelf: 'flex-start',

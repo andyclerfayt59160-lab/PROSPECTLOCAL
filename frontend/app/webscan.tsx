@@ -15,6 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
 import { API_URL } from '../utils/api';
+import { useScan } from '../context/ScanContext';
 
 interface Activity {
   id: string;
@@ -73,6 +74,12 @@ interface RecentWebScan {
   include_linkedin?: boolean;
   include_websites?: boolean;
   scan_type?: string;
+  completed_at?: string;
+  progress?: number;
+  progress_message?: string;
+  progress_step?: number;
+  progress_total_steps?: number;
+  last_progress_at?: string;
 }
 
 type ScanHistoryVerdict = {
@@ -81,6 +88,12 @@ type ScanHistoryVerdict = {
   backgroundColor: string;
   summary: string;
   cost: string;
+};
+
+type ScanStatusPresentation = {
+  label: string;
+  color: string;
+  backgroundColor: string;
 };
 
 const normalizeFamilyKey = (family: string) =>
@@ -130,6 +143,79 @@ const inferWebScanDomainIds = (scan: RecentWebScan): string[] => {
         .filter(Boolean) as string[]
     )
   );
+};
+
+const formatScanDateTime = (dateString?: string) => {
+  if (!dateString) return 'Heure inconnue';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return 'Heure inconnue';
+  return date.toLocaleString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const getScanStatusPresentation = (scan: RecentWebScan): ScanStatusPresentation => {
+  const normalizedStatus = (scan.status || '').toLowerCase();
+
+  if (normalizedStatus === 'processing') {
+    return {
+      label: typeof scan.progress === 'number' ? `En cours (${scan.progress}%)` : 'En cours',
+      color: '#1D4ED8',
+      backgroundColor: '#DBEAFE',
+    };
+  }
+
+  if (normalizedStatus === 'done') {
+    return {
+      label: 'Termine',
+      color: '#047857',
+      backgroundColor: '#D1FAE5',
+    };
+  }
+
+  if (normalizedStatus === 'failed') {
+    return {
+      label: 'Interrompu',
+      color: '#B91C1C',
+      backgroundColor: '#FEE2E2',
+    };
+  }
+
+  return {
+    label: scan.status || 'Statut inconnu',
+    color: '#475569',
+    backgroundColor: '#E2E8F0',
+  };
+};
+
+const buildScanTimelineLabel = (scan: RecentWebScan) => {
+  if ((scan.status || '').toLowerCase() === 'done' && scan.completed_at) {
+    return `Termine le ${formatScanDateTime(scan.completed_at)}`;
+  }
+  return `Lance le ${formatScanDateTime(scan.created_at)}`;
+};
+
+const buildScanProgressLabel = (scan: RecentWebScan) => {
+  if ((scan.status || '').toLowerCase() !== 'processing') {
+    return null;
+  }
+
+  const message = scan.progress_message || 'Scan en cours...';
+  if (
+    typeof scan.progress_step === 'number' &&
+    typeof scan.progress_total_steps === 'number' &&
+    scan.progress_total_steps > 0
+  ) {
+    return `${message} (${scan.progress_step}/${scan.progress_total_steps})`;
+  }
+  if (typeof scan.progress === 'number') {
+    return `${message} (${scan.progress}%)`;
+  }
+  return message;
 };
 
 const buildWebHistoryVerdict = (scan: RecentWebScan): ScanHistoryVerdict => {
@@ -211,6 +297,7 @@ const buildWebHistoryVerdict = (scan: RecentWebScan): ScanHistoryVerdict => {
 
 export default function WebScanScreen() {
   const router = useRouter();
+  const { activeScans } = useScan();
   const [searchType, setSearchType] = useState<'activity' | 'domain'>('activity');
   const [domainMode, setDomainMode] = useState<'quick' | 'exhaustive'>('quick');
   const [query, setQuery] = useState('');
@@ -228,6 +315,7 @@ export default function WebScanScreen() {
   const [loading, setLoading] = useState(false);
   const [citySuggestions, setCitySuggestions] = useState<any[]>([]);
   const [recentScans, setRecentScans] = useState<RecentWebScan[]>([]);
+  const [recentScansTotalCount, setRecentScansTotalCount] = useState(0);
   const [loadingRecentScans, setLoadingRecentScans] = useState(true);
 
   const domains = [
@@ -263,6 +351,18 @@ export default function WebScanScreen() {
     loadRecentScans();
   }, []);
 
+  const activeWebScans = activeScans.filter(
+    (scan) =>
+      scan.scan_type === 'web_scan' ||
+      scan.scan_type === 'internet' ||
+      scan.scan_type === 'standard' ||
+      !scan.scan_type
+  ) as RecentWebScan[];
+
+  useEffect(() => {
+    loadRecentScans();
+  }, [activeWebScans.length]);
+
   const loadRecentScans = async () => {
     setLoadingRecentScans(true);
     try {
@@ -283,9 +383,11 @@ export default function WebScanScreen() {
         scan.scan_type === 'standard'
       );
 
+      setRecentScansTotalCount(scans.length);
       setRecentScans(scans.slice(0, 6));
     } catch (error) {
       console.error('Recent web scans loading error:', error);
+      setRecentScansTotalCount(0);
       setRecentScans([]);
     } finally {
       setLoadingRecentScans(false);
@@ -750,17 +852,6 @@ export default function WebScanScreen() {
     setCitySuggestions([]);
   };
 
-  const formatScanDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('fr-FR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
-
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -1083,13 +1174,43 @@ export default function WebScanScreen() {
           )}
         </TouchableOpacity>
 
+        {activeWebScans.length > 0 && (
+          <View style={styles.activeScanCard}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="pulse-outline" size={18} color="#2563EB" />
+              <Text style={styles.sectionTitle}>Scan en cours</Text>
+            </View>
+            <Text style={styles.activeScanTitle}>{activeWebScans[0]?.query_label}</Text>
+            <Text style={styles.activeScanMeta}>{buildScanTimelineLabel(activeWebScans[0])}</Text>
+            <View style={styles.activeScanProgressRow}>
+              <View style={styles.activeScanProgressBar}>
+                <View
+                  style={[
+                    styles.activeScanProgressFill,
+                    { width: `${Math.max(8, Math.min(activeWebScans[0]?.progress || 0, 100))}%` },
+                  ]}
+                />
+              </View>
+              <Text style={styles.activeScanProgressValue}>
+                {typeof activeWebScans[0]?.progress === 'number' ? `${activeWebScans[0].progress}%` : '...'}
+              </Text>
+            </View>
+            <Text style={styles.activeScanProgressText}>
+              {buildScanProgressLabel(activeWebScans[0]) || 'Scan en cours...'}
+            </Text>
+          </View>
+        )}
+
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Ionicons name="time-outline" size={18} color="#6366F1" />
-            <Text style={styles.sectionTitle}>Derniers scans Internet</Text>
+            <Text style={styles.sectionTitle}>
+              Derniers scans Internet
+              {recentScansTotalCount > 0 ? ` (${Math.min(recentScans.length, recentScansTotalCount)}/${recentScansTotalCount})` : ''}
+            </Text>
           </View>
           <Text style={styles.sectionHelper}>
-            Retrouve directement un scan recent depuis l ecran principal, sans passer par l historique complet.
+            Retrouve directement un scan recent depuis l ecran principal, avec son statut et son horodatage local.
           </Text>
           <TouchableOpacity
             style={styles.historyLink}
@@ -1111,17 +1232,24 @@ export default function WebScanScreen() {
             <View style={styles.recentScansList}>
               {recentScans.map((scan) => {
                 const verdict = buildWebHistoryVerdict(scan);
+                const status = getScanStatusPresentation(scan);
+                const progressLabel = buildScanProgressLabel(scan);
                 return (
                 <View key={scan.id} style={styles.recentScanCard}>
                   <View style={styles.recentScanInfo}>
                     <Text style={styles.recentScanTitle} numberOfLines={1}>{scan.query_label}</Text>
-                    <Text style={styles.recentScanMeta}>
-                      {scan.location_label} • {formatScanDate(scan.created_at)}
-                    </Text>
+                    <Text style={styles.recentScanMeta}>{scan.location_label}</Text>
+                    <Text style={styles.recentScanMeta}>{buildScanTimelineLabel(scan)}</Text>
                     <Text style={styles.recentScanMeta}>
                       {(scan.result_count ?? scan.total_results ?? 0)} resultats
                       {scan.web_phones_found ? ` • +${scan.web_phones_found} telephones web` : ''}
                     </Text>
+                    <View style={[styles.recentScanStatusBadge, { backgroundColor: status.backgroundColor }]}>
+                      <Text style={[styles.recentScanStatusText, { color: status.color }]}>{status.label}</Text>
+                    </View>
+                    {progressLabel && (
+                      <Text style={styles.recentScanMetaStrong}>{progressLabel}</Text>
+                    )}
                     <View style={[styles.recentScanVerdictBadge, { backgroundColor: verdict.backgroundColor }]}>
                       <Text style={[styles.recentScanVerdictText, { color: verdict.color }]}>{verdict.label}</Text>
                     </View>
@@ -1320,6 +1448,52 @@ const styles = StyleSheet.create({
     color: '#92400E',
     lineHeight: 18,
   },
+  activeScanCard: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  activeScanTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E3A8A',
+  },
+  activeScanMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#475569',
+  },
+  activeScanProgressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+  },
+  activeScanProgressBar: {
+    flex: 1,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: '#DBEAFE',
+    overflow: 'hidden',
+  },
+  activeScanProgressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#2563EB',
+  },
+  activeScanProgressValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  activeScanProgressText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#1E3A8A',
+  },
   estimationCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -1416,6 +1590,17 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontSize: 12,
     color: '#6B7280',
+  },
+  recentScanStatusBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  recentScanStatusText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   recentScanMetaStrong: {
     marginTop: 3,

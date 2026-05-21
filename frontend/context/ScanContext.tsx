@@ -8,6 +8,15 @@ interface ActiveScan {
   id: string;
   query_label: string;
   status: string;
+  scan_type?: string;
+  location_label?: string;
+  created_at?: string;
+  completed_at?: string;
+  progress?: number;
+  progress_message?: string;
+  progress_step?: number;
+  progress_total_steps?: number;
+  total_results?: number;
 }
 
 interface Notification {
