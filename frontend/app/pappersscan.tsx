@@ -25,21 +25,21 @@ import { API_URL } from '../utils/api';
 
 // Domaines d'activités
 const DOMAINS = [
-  { id: 'HABITAT', label: 'Habitat', description: 'Plombier, electricien, macon, platrerie, couverture...', color: '#FF9500', count: 25 },
-  { id: 'COMMERCE', label: 'Commerce', description: 'Boulangerie, pharmacie, fleuriste...', color: '#34C759', count: 10 },
-  { id: 'RESTAURATION', label: 'Restauration', description: 'Restaurant, traiteur, cafe...', color: '#FF3B30', count: 8 },
-  { id: 'BEAUTE', label: 'Beaute', description: 'Coiffeur, estheticienne, spa...', color: '#AF52DE', count: 6 },
-  { id: 'AUTO', label: 'Auto', description: 'Garage, carrosserie, auto-ecole...', color: '#007AFF', count: 6 },
-  { id: 'SANTE', label: 'Sante', description: 'Medecin, dentiste, kine...', color: '#5AC8FA', count: 8 },
-  { id: 'B2B', label: 'Services Pro', description: 'Avocat, comptable, nettoyage...', color: '#8E8E93', count: 10 },
-  { id: 'AUTRE', label: 'Autres', description: 'Pressing, photographe, sport...', color: '#FFCC00', count: 7 },
-  { id: 'ALL', label: 'Tous les domaines', description: 'Scan massif de toutes les activités', color: '#6366F1', count: 77 },
+  { id: 'HABITAT', label: 'Habitat', description: 'Plombier, electricien, macon, platrerie, couverture...', color: '#FF9500', count: 32 },
+  { id: 'COMMERCE', label: 'Commerce', description: 'Boulangerie, pharmacie, fleuriste...', color: '#34C759', count: 22 },
+  { id: 'RESTAURATION', label: 'Restauration', description: 'Restaurant, traiteur, cafe...', color: '#FF3B30', count: 7 },
+  { id: 'BEAUTE', label: 'Beaute', description: 'Coiffeur, estheticienne, spa...', color: '#AF52DE', count: 4 },
+  { id: 'AUTO', label: 'Auto', description: 'Garage, carrosserie, auto-ecole...', color: '#007AFF', count: 10 },
+  { id: 'SANTE', label: 'Sante', description: 'Medecin, dentiste, kine...', color: '#5AC8FA', count: 13 },
+  { id: 'B2B', label: 'Services Pro', description: 'Avocat, comptable, nettoyage...', color: '#8E8E93', count: 19 },
+  { id: 'AUTRE', label: 'Autres', description: 'Pressing, photographe, sport...', color: '#FFCC00', count: 16 },
+  { id: 'ALL', label: 'Tous les domaines', description: 'Scan massif de toutes les activités', color: '#6366F1', count: 123 },
 ];
 
 const DOMAIN_PRESENTATION: Record<string, { label?: string; description?: string; count?: number }> = {
   HABITAT: {
     description: 'Plomberie, electricite, chauffage, peinture, couverture, menuiserie...',
-    count: 28,
+    count: 32,
   },
   COMMERCE: {
     description: 'Commerce de proximite : alimentation, pharmacie, fleuriste, optique...',
@@ -49,25 +49,25 @@ const DOMAIN_PRESENTATION: Record<string, { label?: string; description?: string
     count: 7,
   },
   BEAUTE: {
-    count: 3,
+    count: 4,
   },
   AUTO: {
     description: 'Garage, carrosserie, controle technique, auto-ecole...',
-    count: 9,
+    count: 10,
   },
   SANTE: {
-    count: 12,
+    count: 13,
   },
   B2B: {
     description: 'Avocat, comptable, architecture, nettoyage...',
-    count: 20,
+    count: 19,
   },
   AUTRE: {
-    count: 8,
+    count: 16,
   },
   ALL: {
     description: 'Tous les domaines utiles a So Local',
-    count: 109,
+    count: 123,
   },
 };
 
@@ -1076,6 +1076,16 @@ export default function PappersScanScreen() {
         backgroundColor: '#DBEAFE',
         summary: 'Le cadrage ne couvre qu une partie du terrain utile. Le cout sera difficile a rentabiliser tel quel.',
         action: 'Elargis la zone ou reduis les domaines pour remonter la couverture avant de consommer du credit.',
+      };
+    }
+
+    if (coverageRatio >= 0.999) {
+      return {
+        label: 'Couverture complete',
+        color: '#065F46',
+        backgroundColor: '#D1FAE5',
+        summary: 'Tous les NAF retenus et toute la zone demandee seront bien scannes sans coupe cachee.',
+        action: 'Tu peux lancer en sachant que la couverture annoncee correspond bien au terrain demande.',
       };
     }
 
