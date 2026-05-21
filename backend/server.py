@@ -7276,13 +7276,19 @@ async def batch_enrich_full(
 @api_router.get("/admin/users")
 async def get_all_users(current_user: dict = Depends(get_current_admin)):
     """Get all users (admin only)"""
-    users = await db.users.find().to_list(1000)
+    users = await db.users.find().sort([("role", 1), ("email", 1)]).to_list(1000)
     
     # Clean up and hide password hashes
     result = []
     for user in users:
         user.pop("_id", None)
         user.pop("password_hash", None)
+        user["has_google_api_key"] = bool(user.get("google_api_key"))
+        user["has_serper_api_key"] = bool(user.get("serper_api_key"))
+        user["has_pappers_api_key"] = bool(user.get("pappers_api_key"))
+        user["onboarding_completed"] = bool(user.get("onboarding_completed", False))
+        user["can_scan_internet"] = user["has_google_api_key"] and user["has_serper_api_key"]
+        user["can_scan_pappers"] = user["has_pappers_api_key"]
         
         # Get stats for each user
         scan_count = await db.scans.count_documents({"user_id": user["id"]})
@@ -7482,6 +7488,15 @@ async def get_admin_stats(current_user: dict = Depends(get_current_admin)):
     total_users = await db.users.count_documents({})
     total_scans = await db.scans.count_documents({})
     total_businesses = await db.businesses.count_documents({})
+    pending_users = await db.users.count_documents({"is_approved": False})
+    internet_ready_users = await db.users.count_documents({
+        "google_api_key": {"$exists": True, "$nin": [None, ""]},
+        "serper_api_key": {"$exists": True, "$nin": [None, ""]},
+    })
+    pappers_ready_users = await db.users.count_documents({
+        "pappers_api_key": {"$exists": True, "$nin": [None, ""]},
+    })
+    onboarding_completed_users = await db.users.count_documents({"onboarding_completed": True})
     
     # PJ stats
     pj_absent = await db.businesses.count_documents({"has_pagesjaunes": False})
@@ -7499,6 +7514,10 @@ async def get_admin_stats(current_user: dict = Depends(get_current_admin)):
         "total_users": total_users,
         "total_scans": total_scans,
         "total_businesses": total_businesses,
+        "pending_users": pending_users,
+        "internet_ready_users": internet_ready_users,
+        "pappers_ready_users": pappers_ready_users,
+        "onboarding_completed_users": onboarding_completed_users,
         "pj_absent": pj_absent,
         "pj_present": pj_present,
         "with_website": with_website,

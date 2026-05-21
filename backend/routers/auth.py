@@ -118,6 +118,16 @@ async def login(request: Request):
             status_code=403, 
             detail="Votre compte a été désactivé. Contactez un administrateur."
         )
+
+    await db.users.update_one(
+        {"id": user["id"]},
+        {
+            "$set": {
+                "last_login_at": datetime.utcnow(),
+                "last_login_ip": request.client.host if request.client else None,
+            }
+        }
+    )
     
     access_token = create_access_token(data={
         "sub": user["id"],

@@ -30,6 +30,13 @@ interface User {
   registration_date?: string;
   scan_count?: number;
   business_count?: number;
+  has_google_api_key?: boolean;
+  has_serper_api_key?: boolean;
+  has_pappers_api_key?: boolean;
+  onboarding_completed?: boolean;
+  can_scan_internet?: boolean;
+  can_scan_pappers?: boolean;
+  last_login_at?: string;
 }
 
 interface PendingUser {
@@ -43,6 +50,10 @@ interface Stats {
   total_users: number;
   total_scans: number;
   total_businesses: number;
+  pending_users: number;
+  internet_ready_users: number;
+  pappers_ready_users: number;
+  onboarding_completed_users: number;
   pj_absent: number;
   pj_present: number;
   with_website: number;
@@ -75,6 +86,8 @@ export default function AdminScreen() {
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [activeTab, setActiveTab] = useState<'users' | 'pending'>('users');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [userFilter, setUserFilter] = useState<'all' | 'admins' | 'internet_ready' | 'pappers_ready' | 'needs_keys'>('all');
   
   useEffect(() => {
     loadData();
@@ -382,6 +395,38 @@ export default function AdminScreen() {
     });
   };
 
+  const formatDateTime = (dateString?: string) => {
+    if (!dateString) return 'Jamais connecte';
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return 'Date inconnue';
+    return date.toLocaleString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const filteredUsers = users.filter((user) => {
+    const matchesSearch = !searchTerm.trim() || user.email.toLowerCase().includes(searchTerm.trim().toLowerCase());
+    if (!matchesSearch) return false;
+
+    if (userFilter === 'admins') {
+      return user.role === 'admin';
+    }
+    if (userFilter === 'internet_ready') {
+      return !!user.can_scan_internet;
+    }
+    if (userFilter === 'pappers_ready') {
+      return !!user.can_scan_pappers;
+    }
+    if (userFilter === 'needs_keys') {
+      return !user.can_scan_internet || !user.can_scan_pappers || !user.onboarding_completed;
+    }
+    return true;
+  });
+
   const renderUserItem = ({ item }: { item: User }) => (
     <View style={[styles.userCard, item.is_active === false && styles.userCardDisabled]}>
       <View style={styles.userInfo}>
@@ -406,6 +451,24 @@ export default function AdminScreen() {
             📊 {item.scan_count || 0} scans • {item.business_count || 0} entreprises
           </Text>
           <Text style={styles.userDate}>Créé le {formatDate(item.created_at)}</Text>
+          <Text style={styles.userDate}>Derniere connexion : {formatDateTime(item.last_login_at)}</Text>
+          <View style={styles.userBadgesRow}>
+            <View style={[styles.userBadge, item.can_scan_internet ? styles.userBadgeSuccess : styles.userBadgeWarning]}>
+              <Text style={[styles.userBadgeText, item.can_scan_internet ? styles.userBadgeTextSuccess : styles.userBadgeTextWarning]}>
+                {item.can_scan_internet ? 'Internet OK' : 'Internet incomplet'}
+              </Text>
+            </View>
+            <View style={[styles.userBadge, item.can_scan_pappers ? styles.userBadgeSuccess : styles.userBadgeWarning]}>
+              <Text style={[styles.userBadgeText, item.can_scan_pappers ? styles.userBadgeTextSuccess : styles.userBadgeTextWarning]}>
+                {item.can_scan_pappers ? 'Pappers OK' : 'Pappers manquant'}
+              </Text>
+            </View>
+            <View style={[styles.userBadge, item.onboarding_completed ? styles.userBadgeNeutral : styles.userBadgeWarning]}>
+              <Text style={[styles.userBadgeText, item.onboarding_completed ? styles.userBadgeTextNeutral : styles.userBadgeTextWarning]}>
+                {item.onboarding_completed ? 'Onboarding fini' : 'Onboarding a finir'}
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
       <View style={styles.userActions}>
@@ -479,6 +542,26 @@ export default function AdminScreen() {
           </View>
         </View>
       )}
+      {stats && (
+        <View style={styles.adminHealthRow}>
+          <View style={styles.adminHealthCard}>
+            <Text style={styles.adminHealthNumber}>{stats.pending_users}</Text>
+            <Text style={styles.adminHealthLabel}>En attente</Text>
+          </View>
+          <View style={styles.adminHealthCard}>
+            <Text style={styles.adminHealthNumber}>{stats.internet_ready_users}</Text>
+            <Text style={styles.adminHealthLabel}>Internet OK</Text>
+          </View>
+          <View style={styles.adminHealthCard}>
+            <Text style={styles.adminHealthNumber}>{stats.pappers_ready_users}</Text>
+            <Text style={styles.adminHealthLabel}>Pappers OK</Text>
+          </View>
+          <View style={styles.adminHealthCard}>
+            <Text style={styles.adminHealthNumber}>{stats.onboarding_completed_users}</Text>
+            <Text style={styles.adminHealthLabel}>Onboarding fini</Text>
+          </View>
+        </View>
+      )}
       
       {/* Section Title with Tabs */}
       <View style={styles.sectionHeader}>
@@ -520,15 +603,49 @@ export default function AdminScreen() {
 
       {/* Users List */}
       {activeTab === 'users' && (
-        <FlatList
-          data={users}
+        <>
+          <View style={styles.filtersBar}>
+            <View style={styles.searchInputWrap}>
+              <Ionicons name="search" size={16} color="#666" />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Rechercher un email..."
+                placeholderTextColor="#999"
+                value={searchTerm}
+                onChangeText={setSearchTerm}
+                autoCapitalize="none"
+              />
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsRow}>
+              {[
+                { id: 'all', label: 'Tous' },
+                { id: 'admins', label: 'Admins' },
+                { id: 'internet_ready', label: 'Internet OK' },
+                { id: 'pappers_ready', label: 'Pappers OK' },
+                { id: 'needs_keys', label: 'A completer' },
+              ].map((filter) => (
+                <TouchableOpacity
+                  key={filter.id}
+                  style={[styles.filterChip, userFilter === filter.id && styles.filterChipActive]}
+                  onPress={() => setUserFilter(filter.id as typeof userFilter)}
+                >
+                  <Text style={[styles.filterChipText, userFilter === filter.id && styles.filterChipTextActive]}>
+                    {filter.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+          <FlatList
+          data={filteredUsers}
           keyExtractor={(item) => item.id}
           renderItem={renderUserItem}
           contentContainerStyle={styles.usersList}
           ListEmptyComponent={
-            <Text style={styles.emptyText}>Aucun utilisateur</Text>
+            <Text style={styles.emptyText}>Aucun utilisateur pour ce filtre</Text>
           }
         />
+        </>
       )}
 
       {/* Pending Registrations List */}
@@ -848,6 +965,31 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 2,
   },
+  adminHealthRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+    gap: 12,
+  },
+  adminHealthCard: {
+    minWidth: '22%',
+    flexGrow: 1,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  adminHealthNumber: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1C1C1E',
+  },
+  adminHealthLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+  },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -879,6 +1021,54 @@ const styles = StyleSheet.create({
   },
   usersList: {
     padding: 16,
+  },
+  filtersBar: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
+    backgroundColor: '#F5F5F7',
+    gap: 10,
+  },
+  searchInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1C1C1E',
+    paddingVertical: 0,
+  },
+  filterChipsRow: {
+    gap: 8,
+    paddingRight: 16,
+  },
+  filterChip: {
+    backgroundColor: '#FFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+  },
+  filterChipActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#6366F1',
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+  },
+  filterChipTextActive: {
+    color: '#6366F1',
   },
   userCard: {
     backgroundColor: '#FFF',
@@ -933,6 +1123,39 @@ const styles = StyleSheet.create({
   userDate: {
     fontSize: 11,
     color: '#999',
+  },
+  userBadgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
+  },
+  userBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  userBadgeSuccess: {
+    backgroundColor: '#DCFCE7',
+  },
+  userBadgeWarning: {
+    backgroundColor: '#FEF3C7',
+  },
+  userBadgeNeutral: {
+    backgroundColor: '#E0E7FF',
+  },
+  userBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  userBadgeTextSuccess: {
+    color: '#166534',
+  },
+  userBadgeTextWarning: {
+    color: '#92400E',
+  },
+  userBadgeTextNeutral: {
+    color: '#3730A3',
   },
   userActions: {
     flexDirection: 'row',
