@@ -34,9 +34,11 @@ interface Business {
   phone?: string;
   website_url?: string;
   has_website?: boolean;
+  has_google?: boolean;
   google_rating?: number;
   google_reviews_count?: number;
   google_place_id?: string;
+  google_presence_audit_status?: string;
   has_pagesjaunes: boolean;
   pagesjaunes_url?: string;
   pj_confidence?: string;
@@ -94,6 +96,7 @@ interface Stats {
   legal_confirmed: number;
   legal_missing: number;
   audited_visibility: number;
+  google_missing: number;
 }
 
 interface ScanDiagnostics {
@@ -135,7 +138,7 @@ interface ScanRecord {
 }
 
 // Filter types
-type FilterType = 'all' | 'no_pj' | 'no_website' | 'low_reviews' | 'opportunity_max' | 'new' | 'visite_terrain' | 'pappers' | 'rebound' | 'fragile' | 'legal_confirmed' | 'legal_missing' | 'audited';
+type FilterType = 'all' | 'no_pj' | 'no_website' | 'google_missing' | 'low_reviews' | 'opportunity_max' | 'new' | 'visite_terrain' | 'pappers' | 'rebound' | 'fragile' | 'legal_confirmed' | 'legal_missing' | 'audited';
 
 // View mode: verified / unverified / visite_terrain
 type ViewMode = 'verified' | 'unverified' | 'visite_terrain';
@@ -713,6 +716,9 @@ export default function ResultsScreen() {
       case 'no_website':
         filtered = sourceList.filter(b => !b.has_website && !b.website_url);
         break;
+      case 'google_missing':
+        filtered = sourceList.filter(b => getGoogleState(b) === 'missing');
+        break;
       case 'low_reviews':
         filtered = sourceList.filter(b => (b.google_reviews_count || 0) < 5);
         break;
@@ -905,6 +911,7 @@ export default function ResultsScreen() {
       const legalConfirmed = allBusinesses.filter((b: Business) => getLegalState(b) === 'confirmed').length;
       const legalMissing = allBusinesses.filter((b: Business) => ['missing', 'warning'].includes(getLegalState(b))).length;
       const auditedVisibility = allBusinesses.filter((b: Business) => !!b.visibility_audited_at || !!b.legal_presence_audited_at).length;
+      const googleMissing = allBusinesses.filter((b: Business) => getGoogleState(b) === 'missing').length;
       
       setStats({
         ...response.data.stats,
@@ -921,6 +928,7 @@ export default function ResultsScreen() {
             legal_confirmed: legalConfirmed,
             legal_missing: legalMissing,
             audited_visibility: auditedVisibility,
+            google_missing: googleMissing,
           });
     } catch (error) {
       console.error('Error loading results:', error);
@@ -1099,6 +1107,24 @@ export default function ResultsScreen() {
       return { emoji: '🔴', label: 'PJ', bg: '#FFEBEE' };
     }
     return { emoji: '🟡', label: 'PJ?', bg: '#FFF3E0' };
+  };
+
+  const getGoogleState = (item: Business): 'present' | 'missing' | 'unknown' => {
+    const auditStatus = (item.google_presence_audit_status || '').trim().toLowerCase();
+    const hasGoogle = !!(
+      item.has_google ||
+      item.google_place_id ||
+      (item.google_reviews_count || 0) > 0 ||
+      (item.google_rating || 0) > 0
+    );
+
+    if (hasGoogle) {
+      return 'present';
+    }
+    if (auditStatus === 'not_found') {
+      return 'missing';
+    }
+    return 'unknown';
   };
 
   const getLegalState = (item: Business): LegalState => {

@@ -19,6 +19,7 @@ from utils.helpers import (
     normalize_phone,
     EMAIL_PATTERN,
     is_directory_listing_url,
+    is_probable_business_website,
 )
 
 logger = logging.getLogger(__name__)
@@ -390,9 +391,29 @@ async def extract_business_from_serper_result(
     snippet = result.get("snippet", "")
     
     # Skip irrelevant results
-    skip_domains = ["wikipedia.org", "youtube.com", "amazon.", "ebay.", "leboncoin.fr", 
-                    "indeed.com", "pole-emploi.fr", "kompass.com", "societe.com", "pappers.fr",
-                    "pagesjaunes.fr", "google.com", "bing.com"]
+    skip_domains = [
+        "wikipedia.org",
+        "youtube.com",
+        "amazon.",
+        "ebay.",
+        "leboncoin.fr",
+        "indeed.com",
+        "pole-emploi.fr",
+        "kompass.com",
+        "societe.com",
+        "pappers.fr",
+        "pagesjaunes.fr",
+        "google.com",
+        "bing.com",
+        "travaux.com",
+        "mestravaux.com",
+        "habitatpresto.com",
+        "rdvartisans.fr",
+        "123devis.com",
+        "allovoisins.com",
+        "starofservice.com",
+        "houzz.fr",
+    ]
     
     if any(domain in link.lower() for domain in skip_domains):
         return None
@@ -423,9 +444,10 @@ async def extract_business_from_serper_result(
         business_data["name"] = name
         business_data["linkedin_url"] = link
     else:
-        business_data["source_type"] = "website"
+        business_data["source_type"] = "directory" if is_directory_listing_url(link) else "website"
         business_data["name"] = title.split(" - ")[0].split(" | ")[0].strip()
-        business_data["website_url"] = link
+        if is_probable_business_website(link):
+            business_data["website_url"] = link
     
     # Extract phone from snippet using regex
     phone_patterns = [

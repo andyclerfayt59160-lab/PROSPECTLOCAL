@@ -56,7 +56,9 @@ from utils.helpers import (
     extract_phones_from_text,
     ACTIVITY_NAF_MAPPING,
     is_directory_listing_url,
+    is_probable_business_website,
     is_hauts_de_france_postal_code,
+    sanitize_directory_website_fields,
     is_target_france_location,
 )
 from utils.database import get_database_runtime_status
@@ -3358,12 +3360,7 @@ async def get_business_by_id(
             business["phone_source_url"] = None
             business["phone_requires_review"] = True
 
-        if website_url and business["data_sources"].get("website_url") and is_directory_listing_url(website_url):
-            business["data_sources"]["website_url"]["source"] = "pappers" if "pappers.fr" in website_lower else "directory"
-            business["data_sources"]["website_url"]["source_name"] = "Pappers.fr" if "pappers.fr" in website_lower else "Annuaire"
-            business["data_sources"]["website_url"]["icon"] = "document-text"
-            business["pappers_url"] = business.get("pappers_url") or website_url
-            business["website_url"] = ""
+        sanitize_directory_website_fields(business)
     
     # Get user status
     user_status = await db.user_business_status.find_one({
@@ -3988,6 +3985,8 @@ async def get_scan_businesses_with_status(
         result = []
         for b in businesses_list:
             user_status = status_lookup.get(b["id"], {})
+            clean_business = {k: v for k, v in b.items() if k != "_id"}
+            sanitize_directory_website_fields(clean_business)
             
             # Check if client and should be excluded
             client_status = user_status.get("client_status", "not_client")
@@ -3998,15 +3997,12 @@ async def get_scan_businesses_with_status(
             if filter_google_no_pj and not is_confirmed_pagesjaunes_absent(b):
                 continue
             if filter_weak_google:
-                rating = b.get("google_rating", 0) or 0
-                reviews = b.get("google_reviews_count", 0) or 0
+                rating = clean_business.get("google_rating", 0) or 0
+                reviews = clean_business.get("google_reviews_count", 0) or 0
                 if rating >= 4.0 and reviews >= 10:
                     continue
-            if filter_has_website and not b.get("has_website", False):
+            if filter_has_website and not clean_business.get("has_website", False):
                 continue
-            
-            # Clean the business dict to remove _id
-            clean_business = {k: v for k, v in b.items() if k != "_id"}
             
             business_data = {
                 **clean_business,
@@ -4035,6 +4031,7 @@ async def get_scan_businesses_with_status(
                 business_data["score"] = max(0, original_score - 30)  # -30 points
                 business_data["score_penalty"] = "deja_crm"
 
+            sanitize_directory_website_fields(business_data)
             business_data.update(build_solocal_priority_metadata(business_data))
             
             result.append(business_data)
@@ -5999,7 +5996,7 @@ async def web_scan(
                 "address": web_biz.get("address"),
                 "city": web_biz.get("city", request.location),
                 "postal_code": "",
-                "website_url": web_biz.get("website_url"),
+                "website_url": web_biz.get("website_url") if is_probable_business_website(web_biz.get("website_url")) else None,
                 "facebook_url": web_biz.get("facebook_url"),
                 "linkedin_url": web_biz.get("linkedin_url"),
                 "source": "web_scan",
@@ -6009,7 +6006,7 @@ async def web_scan(
                 "siret": None,  # To be enriched
                 "siret_verification_status": None,
                 "has_pagesjaunes": False,
-                "has_website": bool(web_biz.get("website_url")),
+                "has_website": bool(is_probable_business_website(web_biz.get("website_url"))),
                 "google_rating": None,
                 "google_reviews_count": None,
                 "score": 50,  # Base score for web-found leads
@@ -6263,7 +6260,7 @@ async def enrich_scan_with_web_data(
                         update_fields["email"] = email_found
                         score_bonus += 10
                     
-                    if website_found and not business.get("website_url"):
+                    if is_probable_business_website(website_found) and not business.get("website_url"):
                         update_fields["website_url"] = website_found
                         update_fields["has_website"] = True
                         score_bonus += 5
@@ -6433,7 +6430,7 @@ async def enrich_all_scans_with_web_data(
                             update_fields["email"] = email_found
                             score_bonus += 10
                         
-                        if website_found and not business.get("website_url"):
+                        if is_probable_business_website(website_found) and not business.get("website_url"):
                             update_fields["website_url"] = website_found
                             update_fields["has_website"] = True
                             score_bonus += 5

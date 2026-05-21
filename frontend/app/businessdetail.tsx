@@ -170,7 +170,22 @@ const ExternalLinkCard = ({ url, children, style }: { url: string; children: Rea
   );
 };
 
-const DIRECTORY_HOSTS = ['pappers.fr', 'societe.com', 'manageo.fr', 'pagesjaunes.fr', '118712.fr', 'infobel.com'];
+const DIRECTORY_HOSTS = [
+  'pappers.fr',
+  'societe.com',
+  'manageo.fr',
+  'pagesjaunes.fr',
+  '118712.fr',
+  'infobel.com',
+  'travaux.com',
+  'mestravaux.com',
+  'habitatpresto.com',
+  'rdvartisans.fr',
+  '123devis.com',
+  'allovoisins.com',
+  'starofservice.com',
+  'houzz.fr',
+];
 
 const CONTACT_MODE_META: Record<string, { label: string; color: string; bg: string; icon: keyof typeof Ionicons.glyphMap }> = {
   appel: { label: 'A appeler', color: '#047857', bg: '#D1FAE5', icon: 'call-outline' },
@@ -184,7 +199,8 @@ const isDirectoryListingUrl = (url: string | null) => {
   try {
     const normalized = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
     const host = new URL(normalized).hostname.toLowerCase();
-    return DIRECTORY_HOSTS.some((domain) => host === domain || host === `www.${domain}`);
+    const normalizedHost = host.startsWith('www.') ? host.slice(4) : host;
+    return DIRECTORY_HOSTS.some((domain) => normalizedHost === domain || normalizedHost.endsWith(`.${domain}`));
   } catch {
     return false;
   }
@@ -1108,7 +1124,7 @@ ${phoneAnalysis.warning}` : ""
               })()}
               
               {/* Website Badge */}
-              {(business.website_url || business.has_website) && (
+              {!!publicWebsiteUrl && (
                 <View style={[styles.qualityBadge, { backgroundColor: '#D1FAE5', borderColor: '#059669' }]}>
                   <Ionicons name="globe" size={14} color="#059669" />
                   <Text style={[styles.qualityBadgeText, { color: '#059669' }]}>Site web</Text>

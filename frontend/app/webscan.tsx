@@ -15,6 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 
 import { API_URL } from '../utils/api';
+import { formatServerDateTime } from '../utils/dates';
 import { useScan } from '../context/ScanContext';
 
 interface Activity {
@@ -145,19 +146,6 @@ const inferWebScanDomainIds = (scan: RecentWebScan): string[] => {
   );
 };
 
-const formatScanDateTime = (dateString?: string) => {
-  if (!dateString) return 'Heure inconnue';
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) return 'Heure inconnue';
-  return date.toLocaleString('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-};
-
 const getScanStatusPresentation = (scan: RecentWebScan): ScanStatusPresentation => {
   const normalizedStatus = (scan.status || '').toLowerCase();
 
@@ -194,9 +182,9 @@ const getScanStatusPresentation = (scan: RecentWebScan): ScanStatusPresentation 
 
 const buildScanTimelineLabel = (scan: RecentWebScan) => {
   if ((scan.status || '').toLowerCase() === 'done' && scan.completed_at) {
-    return `Termine le ${formatScanDateTime(scan.completed_at)}`;
+    return `Termine le ${formatServerDateTime(scan.completed_at)}`;
   }
-  return `Lance le ${formatScanDateTime(scan.created_at)}`;
+  return `Lance le ${formatServerDateTime(scan.created_at)}`;
 };
 
 const buildScanProgressLabel = (scan: RecentWebScan) => {

@@ -49,11 +49,13 @@ def _build_google_presence(business: dict) -> tuple[str, str]:
 
 def _build_website_presence(business: dict) -> tuple[str, str]:
     website_url = business.get("website_url")
+    website_source = ((business.get("data_sources") or {}).get("website_url") or {})
+    website_source_url = website_source.get("url") if isinstance(website_source, dict) else None
     has_website = bool(website_url or business.get("has_website"))
+    if is_directory_listing_url(website_url) or is_directory_listing_url(website_source_url) or website_source.get("source") == "directory":
+        return "directory", "Site annuaire uniquement"
     if not has_website:
         return "missing", "Sans site web"
-    if is_directory_listing_url(website_url):
-        return "directory", "Site annuaire uniquement"
     return "present", "Site web present"
 
 

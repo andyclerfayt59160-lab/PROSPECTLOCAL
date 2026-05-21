@@ -4,6 +4,7 @@ import { View, Text, TouchableOpacity, ScrollView, Switch, StyleSheet } from 're
 type StatsLike = {
   no_pagesjaunes?: number;
   no_website?: number;
+  google_missing?: number;
   new_in_scan?: number;
   opportunity_max?: number;
   rebound_available?: number;
@@ -77,6 +78,17 @@ export default function ResultsFilterBar({
             🌐 Sans site ({stats?.no_website || 0})
           </Text>
         </TouchableOpacity>
+
+        {stats && (stats.google_missing || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillAmber, activeFilter === 'google_missing' && styles.filterPillAmberActive]}
+            onPress={() => onChangeFilter('google_missing')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextAmber, activeFilter === 'google_missing' && styles.filterPillTextActive]}>
+              📍 Sans Google ({stats.google_missing || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
 
         <TouchableOpacity
           style={[styles.filterPill, activeFilter === 'low_reviews' && styles.filterPillActive]}

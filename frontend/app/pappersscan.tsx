@@ -22,6 +22,7 @@ import { useToast } from '../components/Toast';
 import { useScan } from '../context/ScanContext';
 
 import { API_URL } from '../utils/api';
+import { formatServerDateTime } from '../utils/dates';
 
 // Domaines d'activités
 const DOMAINS = [
@@ -871,16 +872,8 @@ export default function PappersScanScreen() {
   };
 
   const formatScanDate = (value?: string) => {
-    if (!value) return 'Date inconnue';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return 'Date inconnue';
-    return date.toLocaleString('fr-FR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const formatted = formatServerDateTime(value);
+    return formatted === 'Heure inconnue' ? 'Date inconnue' : formatted;
   };
 
   const scrollToHistory = () => {

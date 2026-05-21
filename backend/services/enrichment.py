@@ -733,7 +733,7 @@ async def auto_enrich_scan_with_web(
                             update_fields["email"] = email_found
                             score_bonus += 10
                         
-                        if website_found and not business.get("website_url"):
+                        if is_probable_business_website(website_found) and not business.get("website_url"):
                             update_fields["website_url"] = website_found
                             update_fields["has_website"] = True
                             score_bonus += 5

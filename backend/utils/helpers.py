@@ -14,17 +14,19 @@ EMAIL_PATTERN = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}')
 PHONE_PATTERN_FR = re.compile(r'(?:(?:\+33|0033|0)[1-9])(?:[\s.-]?\d{2}){4}')
 DIRECTORY_HOST_BLOCKLIST = {
     "pappers.fr",
-    "www.pappers.fr",
     "societe.com",
-    "www.societe.com",
     "manageo.fr",
-    "www.manageo.fr",
     "pagesjaunes.fr",
-    "www.pagesjaunes.fr",
     "118712.fr",
-    "www.118712.fr",
     "infobel.com",
-    "www.infobel.com",
+    "travaux.com",
+    "mestravaux.com",
+    "habitatpresto.com",
+    "rdvartisans.fr",
+    "123devis.com",
+    "allovoisins.com",
+    "starofservice.com",
+    "houzz.fr",
 }
 HAUTS_DE_FRANCE_PREFIXES = {"02", "59", "60", "62", "80"}
 FRANCE_POSTAL_CODE_PATTERN = re.compile(r"^\d{5}$")
@@ -98,7 +100,11 @@ def is_directory_listing_url(url: Optional[str]) -> bool:
     except Exception:
         return False
 
-    return host in DIRECTORY_HOST_BLOCKLIST
+    normalized_host = host[4:] if host.startswith("www.") else host
+    return any(
+        normalized_host == blocked_domain or normalized_host.endswith(f".{blocked_domain}")
+        for blocked_domain in DIRECTORY_HOST_BLOCKLIST
+    )
 
 
 def is_probable_business_website(url: Optional[str]) -> bool:
@@ -106,6 +112,39 @@ def is_probable_business_website(url: Optional[str]) -> bool:
     Retourne True si l'URL ressemble à un vrai site d'entreprise.
     """
     return bool(url) and not is_directory_listing_url(url)
+
+
+def sanitize_directory_website_fields(business_data: Optional[dict]) -> Optional[dict]:
+    """
+    Neutralise les URL d'annuaires/marketplaces pour qu'elles ne soient pas
+    comptées comme un vrai site web de l'entreprise.
+    """
+    if not isinstance(business_data, dict):
+        return business_data
+
+    data_sources = business_data.get("data_sources")
+    website_source = data_sources.get("website_url") if isinstance(data_sources, dict) else None
+    website_url = business_data.get("website_url")
+    source_url = website_source.get("url") if isinstance(website_source, dict) else None
+    candidate_url = website_url or source_url
+
+    if not candidate_url or not is_directory_listing_url(candidate_url):
+        return business_data
+
+    candidate_url_lower = candidate_url.lower()
+
+    if isinstance(website_source, dict):
+        website_source["source"] = "pappers" if "pappers.fr" in candidate_url_lower else "directory"
+        website_source["source_name"] = "Pappers.fr" if "pappers.fr" in candidate_url_lower else "Annuaire"
+        website_source["icon"] = "document-text"
+        website_source["url"] = candidate_url
+
+    if "pappers.fr" in candidate_url_lower:
+        business_data["pappers_url"] = business_data.get("pappers_url") or candidate_url
+
+    business_data["website_url"] = ""
+    business_data["has_website"] = False
+    return business_data
 
 
 def is_hauts_de_france_postal_code(postal_code: Optional[str]) -> bool:
