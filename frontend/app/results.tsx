@@ -478,6 +478,8 @@ export default function ResultsScreen() {
   const [viewMode, setViewMode] = useState<ViewMode>('verified');
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [listFocusMode, setListFocusMode] = useState(true);
+  const [auditingTopLeads, setAuditingTopLeads] = useState(false);
+  const [batchAuditSummary, setBatchAuditSummary] = useState('');
   const autoSelectedViewScanRef = React.useRef<string | null>(null);
 
   const currentViewCount = useMemo(() => {
@@ -491,9 +493,19 @@ export default function ResultsScreen() {
     [businesses.length, stats?.total, unverifiedBusinesses.length, visiteTerrainBusinesses.length]
   );
 
+  const webActionableCount = useMemo(
+    () => businesses.length + unverifiedBusinesses.length,
+    [businesses.length, unverifiedBusinesses.length]
+  );
+
   const sourceKind = useMemo(
     () => resolveScanSourceKind(source, scanMeta?.scan_type),
     [scanMeta?.scan_type, source]
+  );
+
+  const suggestedBatchAuditLimit = useMemo(
+    () => Math.min(8, Math.max(1, webActionableCount || registeredTotal || 1)),
+    [registeredTotal, webActionableCount]
   );
 
   const scanSummary = useMemo(() => {
@@ -643,6 +655,7 @@ export default function ResultsScreen() {
     setScanMeta(null);
     setActiveFilter('all');
     setViewMode('verified');
+    setBatchAuditSummary('');
   }, [scanId]);
 
   useEffect(() => {
@@ -890,6 +903,57 @@ export default function ResultsScreen() {
       Alert.alert('Erreur', 'Impossible de charger les résultats');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBatchVisibilityAudit = async () => {
+    if (sourceKind !== 'web' || !scanId) {
+      return;
+    }
+
+    const targetCount = suggestedBatchAuditLimit;
+    const confirmMessage = `Auditer les ${targetCount} meilleurs leads web de ce scan ?\n\nL'audit va verifier Google, PagesJaunes et les donnees legales avec tes propres cles API.`;
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm(confirmMessage)
+      : await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Lancer un audit des meilleurs leads ?',
+            confirmMessage,
+            [
+              { text: 'Annuler', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Auditer', onPress: () => resolve(true) },
+            ]
+          );
+        });
+
+    if (!confirmed) {
+      return;
+    }
+
+    setAuditingTopLeads(true);
+    try {
+      const response = await axios.post(
+        `${API_URL}/api/scans/${scanId}/digital-visibility-audit`,
+        null,
+        {
+          params: { limit: targetCount },
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      const data = response.data || {};
+      const summary = `${data.audited_count || 0} lead(s) audites • ${data.google_confirmed || 0} Google confirmes • ${data.pagesjaunes_confirmed || 0} PagesJaunes confirmees • ${data.legal_confirmed || 0} entreprises legales confirmees`;
+      setBatchAuditSummary(summary);
+      showToast(data.message || summary, 'success');
+      await loadBusinesses();
+    } catch (error: any) {
+      console.error('Error running batch digital visibility audit:', error);
+      showToast(
+        error?.response?.data?.detail || "Impossible de lancer l'audit en lot des leads web.",
+        'error'
+      );
+    } finally {
+      setAuditingTopLeads(false);
     }
   };
 
@@ -1315,6 +1379,37 @@ export default function ResultsScreen() {
         currentViewLabel={currentViewLabel}
         currentViewCount={currentViewCount}
       />
+
+      {sourceKind === 'web' ? (
+        <View style={styles.batchAuditCard}>
+          <View style={styles.batchAuditHeader}>
+            <View style={styles.batchAuditTextWrap}>
+              <Text style={styles.batchAuditTitle}>Audit intelligent des meilleurs leads</Text>
+              <Text style={styles.batchAuditSubtitle}>
+                Verifie en lot Google, PagesJaunes et les donnees legales sur les leads web les plus prometteurs.
+              </Text>
+              {batchAuditSummary ? (
+                <Text style={styles.batchAuditSummary}>{batchAuditSummary}</Text>
+              ) : null}
+            </View>
+            <TouchableOpacity
+              style={[styles.batchAuditButton, auditingTopLeads && styles.batchAuditButtonDisabled]}
+              onPress={handleBatchVisibilityAudit}
+              disabled={auditingTopLeads}
+              activeOpacity={0.85}
+            >
+              {auditingTopLeads ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Ionicons name="shield-checkmark-outline" size={16} color="#FFF" />
+              )}
+              <Text style={styles.batchAuditButtonText}>
+                {auditingTopLeads ? 'Audit en cours...' : `Auditer les ${suggestedBatchAuditLimit} meilleurs`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
 
       <ResultsViewTabs
         visible={!listFocusMode}
@@ -2224,6 +2319,58 @@ const styles = StyleSheet.create({
     color: '#6366F1',
     fontSize: 12,
     fontWeight: '700',
+  },
+  batchAuditCard: {
+    marginHorizontal: 14,
+    marginBottom: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  batchAuditHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
+  },
+  batchAuditTextWrap: {
+    flex: 1,
+    gap: 6,
+  },
+  batchAuditTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  batchAuditSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#475569',
+  },
+  batchAuditSummary: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  batchAuditButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#2563EB',
+  },
+  batchAuditButtonDisabled: {
+    opacity: 0.7,
+  },
+  batchAuditButtonText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFF',
   },
   // View Mode Tabs styles
   viewModeTabs: {

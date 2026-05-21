@@ -2221,32 +2221,22 @@ async def update_pagesjaunes_status(
     }
 
 
-@api_router.post("/businesses/{business_id}/digital-visibility-audit")
-async def audit_business_digital_visibility(
-    business_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Run an explicit Google + PagesJaunes audit for one business.
+def _is_visibility_audit_complete(business: dict) -> bool:
+    """Return True when the business already has a reasonably complete audit snapshot."""
+    has_google_audit = bool(business.get("google_presence_audited_at"))
+    has_legal_audit = bool(business.get("legal_presence_audited_at"))
+    has_pj_audit = bool(business.get("pj_last_checked_at"))
+    return has_google_audit and has_legal_audit and has_pj_audit
 
-    This is intentionally on-demand so we improve web lead quality without
-    silently burning credits across an entire scan.
-    """
-    user_id = current_user["sub"]
-    business = await find_user_business_by_id(user_id, business_id)
-    if not business:
-        raise HTTPException(status_code=404, detail="Business not found")
 
-    user_keys = await fetch_user_api_keys(user_id)
-    google_api_key = user_keys.get("google_api_key", "")
-    serper_api_key = user_keys.get("serper_api_key", "")
-
-    if not google_api_key and not serper_api_key:
-        raise HTTPException(
-            status_code=403,
-            detail="Configure au moins une clé Google ou Serper dans Paramètres > Clés API pour lancer cet audit."
-        )
-
+async def run_business_digital_visibility_audit(
+    business: dict,
+    user_id: str,
+    current_user: dict,
+    google_api_key: str,
+    serper_api_key: str,
+) -> dict:
+    """Audit one business and persist refreshed Google, PagesJaunes and legal signals."""
     name = (business.get("name") or "").strip()
     city = (business.get("city") or "").strip()
     postal_code = (business.get("postal_code") or "").strip()
@@ -2374,7 +2364,7 @@ async def audit_business_digital_visibility(
     updated_business.update(build_solocal_priority_metadata(updated_business))
 
     await db.businesses.update_one(
-        {"id": business_id},
+        {"id": business["id"]},
         {"$set": update_fields}
     )
 
@@ -2382,6 +2372,156 @@ async def audit_business_digital_visibility(
         "success": True,
         "summary": " | ".join(summary_lines),
         "business": updated_business,
+    }
+
+
+@api_router.post("/businesses/{business_id}/digital-visibility-audit")
+async def audit_business_digital_visibility(
+    business_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Run an explicit Google + PagesJaunes audit for one business.
+
+    This is intentionally on-demand so we improve web lead quality without
+    silently burning credits across an entire scan.
+    """
+    user_id = current_user["sub"]
+    business = await find_user_business_by_id(user_id, business_id)
+    if not business:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    user_keys = await fetch_user_api_keys(user_id)
+    google_api_key = user_keys.get("google_api_key", "")
+    serper_api_key = user_keys.get("serper_api_key", "")
+
+    if not google_api_key and not serper_api_key:
+        raise HTTPException(
+            status_code=403,
+            detail="Configure au moins une clé Google ou Serper dans Paramètres > Clés API pour lancer cet audit."
+        )
+
+    return await run_business_digital_visibility_audit(
+        business=business,
+        user_id=user_id,
+        current_user=current_user,
+        google_api_key=google_api_key,
+        serper_api_key=serper_api_key,
+    )
+
+
+@api_router.post("/scans/{scan_id}/digital-visibility-audit")
+async def audit_scan_digital_visibility(
+    scan_id: str,
+    limit: int = Query(default=8, ge=1, le=15),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Audit the top web leads of a scan in batch.
+
+    We deliberately cap the batch size to keep credit consumption explicit and
+    predictable while still upgrading the best candidates automatically.
+    """
+    user_id = current_user["sub"]
+    scan = await db.scans.find_one({"id": scan_id, "user_id": user_id}, {"_id": 0})
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    user_keys = await fetch_user_api_keys(user_id)
+    google_api_key = user_keys.get("google_api_key", "")
+    serper_api_key = user_keys.get("serper_api_key", "")
+
+    if not google_api_key and not serper_api_key:
+        raise HTTPException(
+            status_code=403,
+            detail="Configure au moins une clé Google ou Serper dans Paramètres > Clés API pour lancer cet audit."
+        )
+
+    query = build_active_scan_business_query(scan_id)
+    query["$and"].append({"source": {"$ne": "pappers"}})
+
+    raw_candidates = await db.businesses.find(query, {"_id": 0}).to_list(300)
+
+    candidates = [
+        business
+        for business in raw_candidates
+        if business.get("source") == "web_scan"
+        and business.get("client_status") != "client"
+        and not business.get("is_closed")
+    ]
+
+    if not candidates:
+        return {
+            "success": True,
+            "audited_count": 0,
+            "google_confirmed": 0,
+            "pagesjaunes_confirmed": 0,
+            "legal_confirmed": 0,
+            "updated_business_ids": [],
+            "message": "Aucun lead web exploitable a auditer sur ce scan.",
+        }
+
+    def _candidate_rank_key(business: dict):
+        audit_complete_penalty = 1 if _is_visibility_audit_complete(business) else 0
+        legal_unknown_bonus = 0 if (business.get("siret_verification_status") or "").strip().lower() == "not_found" else 1
+        phone_penalty = 0 if business.get("phone") else 1
+        priority_score = business.get("solocal_priority_score") or business.get("score") or 0
+        return (
+            audit_complete_penalty,
+            phone_penalty,
+            legal_unknown_bonus,
+            -priority_score,
+            business.get("name", ""),
+        )
+
+    ranked_candidates = sorted(candidates, key=_candidate_rank_key)[:limit]
+
+    audited_results: List[dict] = []
+    failed_audits: List[dict] = []
+
+    for business in ranked_candidates:
+        try:
+            audit_result = await run_business_digital_visibility_audit(
+                business=business,
+                user_id=user_id,
+                current_user=current_user,
+                google_api_key=google_api_key,
+                serper_api_key=serper_api_key,
+            )
+            audited_results.append(audit_result)
+        except Exception as exc:
+            logger.warning(
+                "[WARN] Audit batch web impossible pour %s (%s): %s",
+                business.get("name"),
+                business.get("id"),
+                exc,
+            )
+            failed_audits.append({
+                "business_id": business.get("id"),
+                "name": business.get("name"),
+                "error": str(exc),
+            })
+
+    updated_businesses = [result["business"] for result in audited_results]
+    google_confirmed = sum(1 for business in updated_businesses if business.get("has_google"))
+    pagesjaunes_confirmed = sum(1 for business in updated_businesses if business.get("has_pagesjaunes"))
+    legal_confirmed = sum(
+        1
+        for business in updated_businesses
+        if (business.get("siret_verification_status") or "").strip().lower() in {"verified", "ok", "confirmed", "warning"}
+        or business.get("siret")
+    )
+
+    return {
+        "success": True,
+        "audited_count": len(updated_businesses),
+        "failed_count": len(failed_audits),
+        "google_confirmed": google_confirmed,
+        "pagesjaunes_confirmed": pagesjaunes_confirmed,
+        "legal_confirmed": legal_confirmed,
+        "updated_business_ids": [business.get("id") for business in updated_businesses if business.get("id")],
+        "message": f"{len(updated_businesses)} lead(s) audites sur {len(ranked_candidates)} cibles retenues.",
+        "failures": failed_audits,
     }
 
 # ========== MARK BUSINESS AS VIEWED ==========
