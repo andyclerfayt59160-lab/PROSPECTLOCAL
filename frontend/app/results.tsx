@@ -721,8 +721,8 @@ export default function ResultsScreen() {
         return rightDate - leftDate;
       }
 
-      const leftScore = left.score || 0;
-      const rightScore = right.score || 0;
+      const leftScore = left.solocal_priority_score ?? left.score ?? 0;
+      const rightScore = right.solocal_priority_score ?? right.score ?? 0;
       if (leftScore !== rightScore) {
         return rightScore - leftScore;
       }
@@ -999,12 +999,6 @@ export default function ResultsScreen() {
     return 'unknown';
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 60) return '#34C759';
-    if (score >= 30) return '#FF9500';
-    return '#FF3B30';
-  };
-
   const getPJBadge = (item: Business) => {
     const pjState = getPJState(item);
     if (pjState === 'present') {
@@ -1222,12 +1216,6 @@ export default function ResultsScreen() {
           )}
         </View>
 
-        {/* Score */}
-        <View style={styles.cellScore}>
-          <View style={[styles.scoreBadge, { backgroundColor: getScoreColor(item.score) }]}>
-            <Text style={styles.scoreText}>{item.score}</Text>
-          </View>
-        </View>
       </TouchableOpacity>
     );
   };
@@ -1343,8 +1331,8 @@ export default function ResultsScreen() {
       <View style={[styles.tableHeader, listFocusMode && styles.tableHeaderFocused]}>
         <Text style={styles.headerCellPJStatus}>PJ</Text>
         <Text style={styles.headerCellMain}>Établissement</Text>
+        <Text style={styles.headerCellPriority}>Priorité</Text>
         <Text style={styles.headerCellPhone}>Téléphone</Text>
-        <Text style={styles.headerCellScore}>Score</Text>
       </View>
 
       {/* Business List */}
@@ -1672,8 +1660,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  headerCellScore: {
-    width: 60,
+  headerCellPriority: {
+    width: 92,
     color: '#FFF',
     fontSize: 12,
     fontWeight: '700',
@@ -1959,20 +1947,6 @@ const styles = StyleSheet.create({
   },
   pjBadgeText: {
     fontSize: 12,
-  },
-  cellScore: {
-    width: 60,
-    alignItems: 'center',
-  },
-  scoreBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  scoreText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFF',
   },
   cellActions: {
     width: 70,
