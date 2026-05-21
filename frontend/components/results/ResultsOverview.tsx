@@ -11,6 +11,10 @@ type Props = {
   legalConfirmed: number;
   legalMissing: number;
   auditedVisibility: number;
+  offerPackVisibility: number;
+  offerGoogleBusiness: number;
+  offerWebsite: number;
+  offerGoogleReviews: number;
   currentViewLabel: string;
   currentViewCount: number;
 };
@@ -25,6 +29,10 @@ export default function ResultsOverview({
   legalConfirmed,
   legalMissing,
   auditedVisibility,
+  offerPackVisibility,
+  offerGoogleBusiness,
+  offerWebsite,
+  offerGoogleReviews,
   currentViewLabel,
   currentViewCount,
 }: Props) {
@@ -40,6 +48,8 @@ export default function ResultsOverview({
   }
 
   const showAuditDetails = auditedVisibility > 0 || legalConfirmed > 0 || legalMissing > 0;
+  const showOfferDetails =
+    offerPackVisibility > 0 || offerGoogleBusiness > 0 || offerWebsite > 0 || offerGoogleReviews > 0;
 
   return (
     <View style={styles.statsBar}>
@@ -57,19 +67,31 @@ export default function ResultsOverview({
           <Text style={styles.statsVisiteTerrain}>{totalVisiteTerrain}</Text> visite terrain
         </Text>
       </View>
-      {opportunityMax > 0 || showAuditDetails ? (
+      {opportunityMax > 0 || showAuditDetails || showOfferDetails ? (
         <View style={styles.statsDetails}>
           {opportunityMax > 0 ? (
             <Text style={styles.statItemWarm}>🔥 {opportunityMax} opportunites max</Text>
           ) : null}
+          {offerPackVisibility > 0 ? (
+            <Text style={styles.statItemPurple}>Pack visibilite: {offerPackVisibility}</Text>
+          ) : null}
+          {offerGoogleBusiness > 0 ? (
+            <Text style={styles.statItemInfo}>Fiche Google: {offerGoogleBusiness}</Text>
+          ) : null}
+          {offerWebsite > 0 ? (
+            <Text style={styles.statItemBlue}>Site web: {offerWebsite}</Text>
+          ) : null}
+          {offerGoogleReviews > 0 ? (
+            <Text style={styles.statItemSuccess}>Google et avis: {offerGoogleReviews}</Text>
+          ) : null}
           {auditedVisibility > 0 ? (
-            <Text style={styles.statItemInfo}>🧭 {auditedVisibility} audites</Text>
+            <Text style={styles.statItemInfo}>Audit visibility: {auditedVisibility}</Text>
           ) : null}
           {legalConfirmed > 0 ? (
-            <Text style={styles.statItemSuccess}>✅ {legalConfirmed} legales confirmees</Text>
+            <Text style={styles.statItemSuccess}>Legales confirmees: {legalConfirmed}</Text>
           ) : null}
           {legalMissing > 0 ? (
-            <Text style={styles.statItemWarning}>⚠️ {legalMissing} a recouper</Text>
+            <Text style={styles.statItemWarning}>A recouper: {legalMissing}</Text>
           ) : null}
         </View>
       ) : null}
@@ -134,6 +156,16 @@ const styles = StyleSheet.create({
   statItemInfo: {
     fontSize: 14,
     color: '#1D4ED8',
+    fontWeight: '700',
+  },
+  statItemBlue: {
+    fontSize: 14,
+    color: '#2563EB',
+    fontWeight: '700',
+  },
+  statItemPurple: {
+    fontSize: 14,
+    color: '#6D28D9',
     fontWeight: '700',
   },
   statItemSuccess: {

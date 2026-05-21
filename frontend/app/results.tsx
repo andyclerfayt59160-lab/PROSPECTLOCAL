@@ -60,6 +60,9 @@ interface Business {
   digital_visibility_label?: string;
   digital_visibility_summary?: string;
   sales_pitch_hint?: string;
+  recommended_offer_code?: 'pack_visibility' | 'google_business' | 'website' | 'google_reviews' | 'local_visibility' | 'diagnostic' | 'recouper' | 'inactive';
+  recommended_offer_label?: string;
+  recommended_offer_reason?: string;
   recommended_contact_mode?: 'appel' | 'visite' | 'creuser' | 'verifier';
   related_clue_potential?: boolean;
   related_clue_reason?: string;
@@ -97,6 +100,10 @@ interface Stats {
   legal_missing: number;
   audited_visibility: number;
   google_missing: number;
+  offer_pack_visibility: number;
+  offer_google_business: number;
+  offer_website: number;
+  offer_google_reviews: number;
 }
 
 interface ScanDiagnostics {
@@ -143,7 +150,7 @@ interface ScanRecord {
 }
 
 // Filter types
-type FilterType = 'all' | 'no_pj' | 'no_website' | 'google_missing' | 'low_reviews' | 'opportunity_max' | 'new' | 'visite_terrain' | 'pappers' | 'rebound' | 'fragile' | 'legal_confirmed' | 'legal_missing' | 'audited';
+type FilterType = 'all' | 'no_pj' | 'no_website' | 'google_missing' | 'low_reviews' | 'opportunity_max' | 'new' | 'visite_terrain' | 'pappers' | 'rebound' | 'fragile' | 'legal_confirmed' | 'legal_missing' | 'audited' | 'offer_pack_visibility' | 'offer_google_business' | 'offer_website' | 'offer_google_reviews';
 
 // View mode: verified / unverified / visite_terrain
 type ViewMode = 'verified' | 'unverified' | 'visite_terrain';
@@ -456,6 +463,17 @@ const PHONE_RELIABILITY_META: Record<string, { color: string; bg: string; icon: 
   missing: { color: '#6B7280', bg: '#F3F4F6', icon: 'remove-circle-outline' },
 };
 
+const OFFER_META: Record<string, { color: string; bg: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  pack_visibility: { color: '#6D28D9', bg: '#F5F3FF', icon: 'rocket-outline' },
+  google_business: { color: '#B45309', bg: '#FEF3C7', icon: 'location-outline' },
+  website: { color: '#2563EB', bg: '#DBEAFE', icon: 'globe-outline' },
+  google_reviews: { color: '#047857', bg: '#D1FAE5', icon: 'star-outline' },
+  local_visibility: { color: '#0F766E', bg: '#CCFBF1', icon: 'map-outline' },
+  diagnostic: { color: '#475569', bg: '#E2E8F0', icon: 'construct-outline' },
+  recouper: { color: '#B91C1C', bg: '#FEE2E2', icon: 'shield-outline' },
+  inactive: { color: '#991B1B', bg: '#FEE2E2', icon: 'close-circle-outline' },
+};
+
 type PJState = 'present' | 'absent' | 'unknown';
 type LegalState = 'confirmed' | 'missing' | 'warning' | 'closed' | 'unknown';
 
@@ -724,6 +742,18 @@ export default function ResultsScreen() {
       case 'google_missing':
         filtered = sourceList.filter(b => getGoogleState(b) === 'missing');
         break;
+      case 'offer_pack_visibility':
+        filtered = sourceList.filter(b => b.recommended_offer_code === 'pack_visibility');
+        break;
+      case 'offer_google_business':
+        filtered = sourceList.filter(b => b.recommended_offer_code === 'google_business');
+        break;
+      case 'offer_website':
+        filtered = sourceList.filter(b => b.recommended_offer_code === 'website');
+        break;
+      case 'offer_google_reviews':
+        filtered = sourceList.filter(b => b.recommended_offer_code === 'google_reviews');
+        break;
       case 'low_reviews':
         filtered = sourceList.filter(b => (b.google_reviews_count || 0) < 5);
         break;
@@ -929,6 +959,10 @@ export default function ResultsScreen() {
       const legalMissing = allBusinesses.filter((b: Business) => ['missing', 'warning'].includes(getLegalState(b))).length;
       const auditedVisibility = allBusinesses.filter((b: Business) => !!b.visibility_audited_at || !!b.legal_presence_audited_at).length;
       const googleMissing = allBusinesses.filter((b: Business) => getGoogleState(b) === 'missing').length;
+      const offerPackVisibility = allBusinesses.filter((b: Business) => b.recommended_offer_code === 'pack_visibility').length;
+      const offerGoogleBusiness = allBusinesses.filter((b: Business) => b.recommended_offer_code === 'google_business').length;
+      const offerWebsite = allBusinesses.filter((b: Business) => b.recommended_offer_code === 'website').length;
+      const offerGoogleReviews = allBusinesses.filter((b: Business) => b.recommended_offer_code === 'google_reviews').length;
       
       setStats({
         ...response.data.stats,
@@ -946,6 +980,10 @@ export default function ResultsScreen() {
             legal_missing: legalMissing,
             audited_visibility: auditedVisibility,
             google_missing: googleMissing,
+            offer_pack_visibility: offerPackVisibility,
+            offer_google_business: offerGoogleBusiness,
+            offer_website: offerWebsite,
+            offer_google_reviews: offerGoogleReviews,
           });
     } catch (error) {
       console.error('Error loading results:', error);
@@ -1230,6 +1268,7 @@ export default function ResultsScreen() {
       const contactRoute = item.contact_route ? CONTACT_ROUTE_META[item.contact_route] : null;
       const phoneReliability = item.phone_reliability_status ? PHONE_RELIABILITY_META[item.phone_reliability_status] : null;
       const legalBadge = getLegalBadgeMeta(item);
+      const recommendedOffer = item.recommended_offer_code ? OFFER_META[item.recommended_offer_code] : null;
     
     return (
       <TouchableOpacity 
@@ -1325,6 +1364,14 @@ export default function ResultsScreen() {
                 {legalBadge.label}
               </Text>
             </View>
+            {recommendedOffer && !!item.recommended_offer_label ? (
+              <View style={[styles.offerBadge, { backgroundColor: recommendedOffer.bg }]}>
+                <Ionicons name={recommendedOffer.icon} size={12} color={recommendedOffer.color} />
+                <Text style={[styles.offerBadgeText, { color: recommendedOffer.color }]} numberOfLines={1}>
+                  {item.recommended_offer_label}
+                </Text>
+              </View>
+            ) : null}
             {!!item.next_best_action && (
             <View style={styles.nextActionBadge}>
               <Ionicons name="flash-outline" size={12} color="#6D28D9" />
@@ -1489,6 +1536,10 @@ export default function ResultsScreen() {
         legalConfirmed={stats?.legal_confirmed || 0}
         legalMissing={stats?.legal_missing || 0}
         auditedVisibility={stats?.audited_visibility || 0}
+        offerPackVisibility={stats?.offer_pack_visibility || 0}
+        offerGoogleBusiness={stats?.offer_google_business || 0}
+        offerWebsite={stats?.offer_website || 0}
+        offerGoogleReviews={stats?.offer_google_reviews || 0}
         currentViewLabel={currentViewLabel}
         currentViewCount={currentViewCount}
       />
@@ -2083,6 +2134,20 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   legalBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  offerBadge: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  offerBadgeText: {
     fontSize: 11,
     fontWeight: '700',
   },

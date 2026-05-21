@@ -12,6 +12,10 @@ type StatsLike = {
   legal_confirmed?: number;
   legal_missing?: number;
   audited_visibility?: number;
+  offer_pack_visibility?: number;
+  offer_google_business?: number;
+  offer_website?: number;
+  offer_google_reviews?: number;
 };
 
 type Props = {
@@ -86,6 +90,50 @@ export default function ResultsFilterBar({
           >
             <Text style={[styles.filterPillText, styles.filterPillTextAmber, activeFilter === 'google_missing' && styles.filterPillTextActive]}>
               📍 Sans Google ({stats.google_missing || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.offer_pack_visibility || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillPurple, activeFilter === 'offer_pack_visibility' && styles.filterPillPurpleActive]}
+            onPress={() => onChangeFilter('offer_pack_visibility')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextPurple, activeFilter === 'offer_pack_visibility' && styles.filterPillTextActive]}>
+              Pack visibilite ({stats.offer_pack_visibility || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.offer_google_business || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillAmber, activeFilter === 'offer_google_business' && styles.filterPillAmberActive]}
+            onPress={() => onChangeFilter('offer_google_business')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextAmber, activeFilter === 'offer_google_business' && styles.filterPillTextActive]}>
+              Fiche Google ({stats.offer_google_business || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.offer_website || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillBlue, activeFilter === 'offer_website' && styles.filterPillBlueActive]}
+            onPress={() => onChangeFilter('offer_website')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextBlue, activeFilter === 'offer_website' && styles.filterPillTextActive]}>
+              Site web ({stats.offer_website || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.offer_google_reviews || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillGreen, activeFilter === 'offer_google_reviews' && styles.filterPillGreenActive]}
+            onPress={() => onChangeFilter('offer_google_reviews')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextGreen, activeFilter === 'offer_google_reviews' && styles.filterPillTextActive]}>
+              Google et avis ({stats.offer_google_reviews || 0})
             </Text>
           </TouchableOpacity>
         ) : null}
@@ -259,6 +307,17 @@ const styles = StyleSheet.create({
   },
   filterPillTextGreen: {
     color: '#15803D',
+  },
+  filterPillPurple: {
+    borderColor: '#7C3AED',
+    backgroundColor: '#F5F3FF',
+  },
+  filterPillPurpleActive: {
+    backgroundColor: '#7C3AED',
+    borderColor: '#7C3AED',
+  },
+  filterPillTextPurple: {
+    color: '#6D28D9',
   },
   filterPillBlue: {
     borderColor: '#2563EB',

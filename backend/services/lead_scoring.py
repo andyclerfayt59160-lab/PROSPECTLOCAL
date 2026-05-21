@@ -169,6 +169,69 @@ def _build_visibility_gap(
     )
 
 
+def _build_offer_recommendation(
+    google_status: str,
+    website_status: str,
+    pj_status: str,
+    legal_status: str,
+    google_reviews_count: int,
+) -> tuple[str, str, str]:
+    if legal_status in {"missing", "warning"}:
+        return (
+            "recouper",
+            "A recouper",
+            "Verifier d'abord la legitimite et les donnees legales avant proposition commerciale.",
+        )
+
+    if legal_status == "closed":
+        return (
+            "inactive",
+            "Entreprise fermee",
+            "Ne pas prioriser commercialement tant que le statut legal n'est pas clarifie.",
+        )
+
+    if google_status == "missing" and website_status in {"missing", "directory"}:
+        return (
+            "pack_visibility",
+            "Pack visibilite",
+            "L'entreprise manque de fiche Google et de vrai site : proposer une presence digitale complete.",
+        )
+
+    if google_status == "missing":
+        return (
+            "google_business",
+            "Fiche Google",
+            "La priorite est de creer ou renforcer la fiche Google pour la visibilite locale.",
+        )
+
+    if website_status in {"missing", "directory"}:
+        return (
+            "website",
+            "Site web",
+            "La presence locale existe deja, mais il manque un vrai site proprietaire pour convertir.",
+        )
+
+    if google_status == "fragile" or google_reviews_count < 5:
+        return (
+            "google_reviews",
+            "Google et avis",
+            "La fiche Google existe mais reste trop faible : travailler avis, contenu et conversion.",
+        )
+
+    if pj_status == "absent":
+        return (
+            "local_visibility",
+            "Visibilite locale",
+            "Completer la presence locale avec des annuaires et signaux de confiance supplementaires.",
+        )
+
+    return (
+        "diagnostic",
+        "Diagnostic",
+        "La presence existe deja, il faut verifier le meilleur angle commercial avant relance.",
+    )
+
+
 def build_solocal_priority_metadata(business: dict) -> dict:
     """
     Build a commercial priority aligned with local digital visibility gaps.
@@ -198,6 +261,13 @@ def build_solocal_priority_metadata(business: dict) -> dict:
         google_status=google_status,
         website_status=website_status,
         pj_status=pj_status,
+    )
+    offer_code, offer_label, offer_reason = _build_offer_recommendation(
+        google_status=google_status,
+        website_status=website_status,
+        pj_status=pj_status,
+        legal_status=legal_status,
+        google_reviews_count=_coerce_int(business.get("google_reviews_count")),
     )
 
     digital_signals: list[str] = []
@@ -411,6 +481,9 @@ def build_solocal_priority_metadata(business: dict) -> dict:
         "digital_visibility_label": visibility_gap_label,
         "digital_visibility_summary": visibility_gap_summary,
         "sales_pitch_hint": sales_pitch_hint,
+        "recommended_offer_code": offer_code,
+        "recommended_offer_label": offer_label,
+        "recommended_offer_reason": offer_reason,
         "google_presence_status": google_status,
         "google_presence_label": google_label,
         "website_presence_status": website_status,
