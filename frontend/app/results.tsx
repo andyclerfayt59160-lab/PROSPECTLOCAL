@@ -734,6 +734,38 @@ export default function ResultsScreen() {
     };
   };
 
+  const getReadinessRank = (item: Business): number => {
+    switch (item.sales_readiness_status) {
+      case 'ready_call':
+        return 0;
+      case 'review':
+        return 1;
+      case 'field':
+        return 2;
+      case 'avoid':
+        return 3;
+      default:
+        return 2;
+    }
+  };
+
+  const getLegalRank = (item: Business): number => {
+    switch (getLegalState(item)) {
+      case 'confirmed':
+        return 0;
+      case 'warning':
+        return 1;
+      case 'unknown':
+        return 2;
+      case 'missing':
+        return 3;
+      case 'closed':
+        return 4;
+      default:
+        return 2;
+    }
+  };
+
   const applyFilter = () => {
     // Choose the source list based on view mode
     let sourceList: Business[] = [];
@@ -815,17 +847,31 @@ export default function ResultsScreen() {
     }
 
     const sortedBusinesses = [...filtered].sort((left, right) => {
-      const leftDate = left.date_creation ? new Date(left.date_creation).getTime() : 0;
-      const rightDate = right.date_creation ? new Date(right.date_creation).getTime() : 0;
+      if (sourceKind === 'web') {
+        const leftReadiness = getReadinessRank(left);
+        const rightReadiness = getReadinessRank(right);
+        if (leftReadiness !== rightReadiness) {
+          return leftReadiness - rightReadiness;
+        }
 
-      if (leftDate !== rightDate) {
-        return rightDate - leftDate;
+        const leftLegal = getLegalRank(left);
+        const rightLegal = getLegalRank(right);
+        if (leftLegal !== rightLegal) {
+          return leftLegal - rightLegal;
+        }
       }
 
       const leftScore = left.solocal_priority_score ?? left.score ?? 0;
       const rightScore = right.solocal_priority_score ?? right.score ?? 0;
       if (leftScore !== rightScore) {
         return rightScore - leftScore;
+      }
+
+      const leftDate = left.date_creation ? new Date(left.date_creation).getTime() : 0;
+      const rightDate = right.date_creation ? new Date(right.date_creation).getTime() : 0;
+
+      if (leftDate !== rightDate) {
+        return rightDate - leftDate;
       }
 
       return (left.name || '').localeCompare(right.name || '');
