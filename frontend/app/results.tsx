@@ -529,6 +529,7 @@ export default function ResultsScreen() {
   const [listFocusMode, setListFocusMode] = useState(true);
   const [auditingTopLeads, setAuditingTopLeads] = useState(false);
   const [batchAuditSummary, setBatchAuditSummary] = useState('');
+  const [hideAvoidLeads, setHideAvoidLeads] = useState(true);
   const autoSelectedViewScanRef = React.useRef<string | null>(null);
 
   const currentViewCount = useMemo(() => {
@@ -705,6 +706,7 @@ export default function ResultsScreen() {
     setActiveFilter('all');
     setViewMode('verified');
     setBatchAuditSummary('');
+    setHideAvoidLeads(true);
   }, [scanId]);
 
   useEffect(() => {
@@ -844,6 +846,10 @@ export default function ResultsScreen() {
         break;
       default:
         filtered = sourceList;
+    }
+
+    if (sourceKind === 'web' && hideAvoidLeads && activeFilter !== 'avoid') {
+      filtered = filtered.filter((business) => business.sales_readiness_status !== 'avoid');
     }
 
     const sortedBusinesses = [...filtered].sort((left, right) => {
@@ -1665,6 +1671,82 @@ export default function ResultsScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+        </View>
+      ) : null}
+
+      {sourceKind === 'web' ? (
+        <View style={styles.shortlistCard}>
+          <View style={styles.shortlistHeader}>
+            <View style={styles.shortlistTextWrap}>
+              <Text style={styles.shortlistTitle}>Shortlist du jour</Text>
+              <Text style={styles.shortlistSubtitle}>
+                Passe directement sur les leads a appeler, a recouper ou a visiter sans te noyer dans le reste.
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.shortlistToggleButton, hideAvoidLeads && styles.shortlistToggleButtonActive]}
+              onPress={() => setHideAvoidLeads((current) => !current)}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={hideAvoidLeads ? 'eye-off-outline' : 'eye-outline'}
+                size={16}
+                color={hideAvoidLeads ? '#FFF' : '#6366F1'}
+              />
+              <Text style={[styles.shortlistToggleText, hideAvoidLeads && styles.shortlistToggleTextActive]}>
+                {hideAvoidLeads ? 'A eviter masques' : 'Afficher tout'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.shortlistActions}>
+            <TouchableOpacity
+              style={[styles.shortlistAction, styles.shortlistActionCall]}
+              onPress={() => {
+                setViewMode('verified');
+                setActiveFilter('ready_call');
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="call-outline" size={16} color="#047857" />
+              <Text style={styles.shortlistActionLabel}>A appeler</Text>
+              <Text style={styles.shortlistActionCount}>{stats?.readiness_ready_call || 0}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.shortlistAction, styles.shortlistActionReview]}
+              onPress={() => {
+                setViewMode('verified');
+                setActiveFilter('review');
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="search-outline" size={16} color="#B45309" />
+              <Text style={styles.shortlistActionLabel}>A recouper</Text>
+              <Text style={styles.shortlistActionCount}>{stats?.readiness_review || 0}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.shortlistAction, styles.shortlistActionField]}
+              onPress={() => {
+                setViewMode('visite_terrain');
+                setActiveFilter('field');
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="walk-outline" size={16} color="#6D28D9" />
+              <Text style={styles.shortlistActionLabel}>A visiter</Text>
+              <Text style={styles.shortlistActionCount}>{stats?.readiness_field || 0}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {(stats?.readiness_avoid || 0) > 0 ? (
+            <Text style={styles.shortlistFootnote}>
+              {hideAvoidLeads
+                ? `${stats?.readiness_avoid || 0} lead(s) a eviter sont masques de la liste principale.`
+                : `${stats?.readiness_avoid || 0} lead(s) a eviter restent visibles si tu veux les controler.`}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -2670,6 +2752,98 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: '#FFF',
+  },
+  shortlistCard: {
+    marginHorizontal: 14,
+    marginBottom: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 12,
+  },
+  shortlistHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  shortlistTextWrap: {
+    flex: 1,
+    gap: 6,
+  },
+  shortlistTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  shortlistSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#475569',
+  },
+  shortlistToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#EEF2FF',
+  },
+  shortlistToggleButtonActive: {
+    backgroundColor: '#6366F1',
+  },
+  shortlistToggleText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6366F1',
+  },
+  shortlistToggleTextActive: {
+    color: '#FFF',
+  },
+  shortlistActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  shortlistAction: {
+    flex: 1,
+    minWidth: 160,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    gap: 6,
+  },
+  shortlistActionCall: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  shortlistActionReview: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#FCD34D',
+  },
+  shortlistActionField: {
+    backgroundColor: '#F5F3FF',
+    borderColor: '#DDD6FE',
+  },
+  shortlistActionLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  shortlistActionCount: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  shortlistFootnote: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '600',
   },
   // View Mode Tabs styles
   viewModeTabs: {
