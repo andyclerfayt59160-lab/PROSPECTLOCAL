@@ -10,6 +10,7 @@ import {
   Alert,
   Platform,
   Modal,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -87,7 +88,9 @@ export default function AdminScreen() {
   const [updating, setUpdating] = useState(false);
   const [activeTab, setActiveTab] = useState<'users' | 'pending'>('users');
   const [searchTerm, setSearchTerm] = useState('');
-  const [userFilter, setUserFilter] = useState<'all' | 'admins' | 'internet_ready' | 'pappers_ready' | 'needs_keys'>('all');
+  const [userFilter, setUserFilter] = useState<'all' | 'admins' | 'internet_ready' | 'pappers_ready' | 'needs_keys' | 'disabled' | 'onboarding_pending'>('all');
+  const [editOnboardingCompleted, setEditOnboardingCompleted] = useState(false);
+  const [editClearApiKeys, setEditClearApiKeys] = useState(false);
   
   useEffect(() => {
     loadData();
@@ -204,6 +207,8 @@ export default function AdminScreen() {
     setEditingUser(user);
     setEditPassword('');
     setEditRole(user.role);
+    setEditOnboardingCompleted(!!user.onboarding_completed);
+    setEditClearApiKeys(false);
     setShowEditModal(true);
   };
 
@@ -309,10 +314,17 @@ export default function AdminScreen() {
     setUpdating(true);
     try {
       const token = await AsyncStorage.getItem('token');
-      const updateData: any = { role: editRole };
+      const updateData: any = {
+        role: editRole,
+        onboarding_completed: editClearApiKeys ? false : editOnboardingCompleted,
+      };
       
       if (editPassword.trim()) {
         updateData.password = editPassword.trim();
+      }
+
+      if (editClearApiKeys) {
+        updateData.clear_api_keys = true;
       }
       
       await axios.patch(
@@ -322,9 +334,21 @@ export default function AdminScreen() {
       );
 
       // Update local state
-      setUsers(prev => prev.map(u => 
-        u.id === editingUser.id ? { ...u, role: editRole } : u
+      setUsers(prev => prev.map(u =>
+        u.id === editingUser.id
+          ? {
+              ...u,
+              role: editRole,
+              onboarding_completed: editClearApiKeys ? false : editOnboardingCompleted,
+              has_google_api_key: editClearApiKeys ? false : u.has_google_api_key,
+              has_serper_api_key: editClearApiKeys ? false : u.has_serper_api_key,
+              has_pappers_api_key: editClearApiKeys ? false : u.has_pappers_api_key,
+              can_scan_internet: editClearApiKeys ? false : u.can_scan_internet,
+              can_scan_pappers: editClearApiKeys ? false : u.can_scan_pappers,
+            }
+          : u
       ));
+      loadData();
 
       if (Platform.OS === 'web') {
         window.alert(`✅ Utilisateur mis à jour${editPassword ? '\n\n📋 Nouveau mot de passe : ' + editPassword : ''}`);
@@ -334,6 +358,8 @@ export default function AdminScreen() {
 
       setShowEditModal(false);
       setEditingUser(null);
+      setEditPassword('');
+      setEditClearApiKeys(false);
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Erreur lors de la mise à jour';
       if (Platform.OS === 'web') {
@@ -424,6 +450,12 @@ export default function AdminScreen() {
     if (userFilter === 'needs_keys') {
       return !user.can_scan_internet || !user.can_scan_pappers || !user.onboarding_completed;
     }
+    if (userFilter === 'disabled') {
+      return user.is_active === false;
+    }
+    if (userFilter === 'onboarding_pending') {
+      return !user.onboarding_completed;
+    }
     return true;
   });
 
@@ -453,6 +485,11 @@ export default function AdminScreen() {
           <Text style={styles.userDate}>Créé le {formatDate(item.created_at)}</Text>
           <Text style={styles.userDate}>Derniere connexion : {formatDateTime(item.last_login_at)}</Text>
           <View style={styles.userBadgesRow}>
+            <View style={[styles.userBadge, item.is_active === false ? styles.userBadgeDanger : styles.userBadgeNeutral]}>
+              <Text style={[styles.userBadgeText, item.is_active === false ? styles.userBadgeTextDanger : styles.userBadgeTextNeutral]}>
+                {item.is_active === false ? 'Compte coupe' : 'Compte actif'}
+              </Text>
+            </View>
             <View style={[styles.userBadge, item.can_scan_internet ? styles.userBadgeSuccess : styles.userBadgeWarning]}>
               <Text style={[styles.userBadgeText, item.can_scan_internet ? styles.userBadgeTextSuccess : styles.userBadgeTextWarning]}>
                 {item.can_scan_internet ? 'Internet OK' : 'Internet incomplet'}
@@ -623,6 +660,8 @@ export default function AdminScreen() {
                 { id: 'internet_ready', label: 'Internet OK' },
                 { id: 'pappers_ready', label: 'Pappers OK' },
                 { id: 'needs_keys', label: 'A completer' },
+                { id: 'onboarding_pending', label: 'Onboarding' },
+                { id: 'disabled', label: 'Desactives' },
               ].map((filter) => (
                 <TouchableOpacity
                   key={filter.id}
@@ -820,7 +859,8 @@ export default function AdminScreen() {
               </TouchableOpacity>
             </View>
 
-            {editingUser && (
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {editingUser && (
               <>
                 <View style={styles.editUserInfo}>
                   <Ionicons name="person-circle" size={48} color="#6366F1" />
@@ -893,6 +933,70 @@ export default function AdminScreen() {
                   </View>
                 </View>
 
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Parcours utilisateur</Text>
+                  <View style={styles.maintenanceRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.maintenanceOption,
+                        editOnboardingCompleted && styles.maintenanceOptionActive,
+                      ]}
+                      onPress={() => setEditOnboardingCompleted(true)}
+                    >
+                      <Text
+                        style={[
+                          styles.maintenanceOptionText,
+                          editOnboardingCompleted && styles.maintenanceOptionTextActive,
+                        ]}
+                      >
+                        Onboarding fini
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.maintenanceOption,
+                        !editOnboardingCompleted && styles.maintenanceOptionActive,
+                      ]}
+                      onPress={() => setEditOnboardingCompleted(false)}
+                    >
+                      <Text
+                        style={[
+                          styles.maintenanceOptionText,
+                          !editOnboardingCompleted && styles.maintenanceOptionTextActive,
+                        ]}
+                      >
+                        Onboarding a refaire
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Maintenance du compte</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.maintenanceOption,
+                      styles.dangerOption,
+                      editClearApiKeys && styles.dangerOptionActive,
+                    ]}
+                    onPress={() => setEditClearApiKeys((prev) => !prev)}
+                  >
+                    <Text
+                      style={[
+                        styles.dangerOptionText,
+                        editClearApiKeys && styles.dangerOptionTextActive,
+                      ]}
+                    >
+                      {editClearApiKeys
+                        ? 'Cles API perso effacees au prochain enregistrement'
+                        : 'Effacer les cles API personnelles'}
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={styles.maintenanceHint}>
+                    Effacer les cles force l utilisateur a reconfigurer Google, Serper et Pappers lors de sa prochaine utilisation.
+                  </Text>
+                </View>
+
                 <TouchableOpacity
                   style={[styles.createButton, updating && styles.createButtonDisabled]}
                   onPress={handleUpdateUser}
@@ -905,7 +1009,8 @@ export default function AdminScreen() {
                   )}
                 </TouchableOpacity>
               </>
-            )}
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -1144,6 +1249,9 @@ const styles = StyleSheet.create({
   userBadgeNeutral: {
     backgroundColor: '#E0E7FF',
   },
+  userBadgeDanger: {
+    backgroundColor: '#FEE2E2',
+  },
   userBadgeText: {
     fontSize: 11,
     fontWeight: '700',
@@ -1156,6 +1264,9 @@ const styles = StyleSheet.create({
   },
   userBadgeTextNeutral: {
     color: '#3730A3',
+  },
+  userBadgeTextDanger: {
+    color: '#B91C1C',
   },
   userActions: {
     flexDirection: 'row',
@@ -1191,6 +1302,7 @@ const styles = StyleSheet.create({
     padding: 24,
     width: '100%',
     maxWidth: 400,
+    maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1311,6 +1423,57 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1C1C1E',
     marginTop: 8,
+  },
+  maintenanceRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  maintenanceOption: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5EA',
+    backgroundColor: '#F5F5F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  maintenanceOptionActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#6366F1',
+  },
+  maintenanceOptionText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+    textAlign: 'center',
+  },
+  maintenanceOptionTextActive: {
+    color: '#3730A3',
+  },
+  dangerOption: {
+    backgroundColor: '#FFF5F5',
+    borderColor: '#FECACA',
+  },
+  dangerOptionActive: {
+    backgroundColor: '#DC2626',
+    borderColor: '#DC2626',
+  },
+  dangerOptionText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B91C1C',
+    textAlign: 'center',
+  },
+  dangerOptionTextActive: {
+    color: '#FFF',
+  },
+  maintenanceHint: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#666',
   },
   // Tabs styles
   tabsContainer: {

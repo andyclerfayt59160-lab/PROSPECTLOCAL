@@ -7777,9 +7777,13 @@ async def update_user(
     # Prevent admin from disabling themselves
     if user_id == current_user["sub"] and update_data.get("is_active") == False:
         raise HTTPException(status_code=400, detail="Vous ne pouvez pas désactiver votre propre compte")
+
+    if user_id == current_user["sub"] and update_data.get("role") == "user":
+        raise HTTPException(status_code=400, detail="Vous ne pouvez pas retirer vos propres droits admin")
     
     # Build update dict
     update_fields = {}
+    unset_fields = {}
     
     if "is_active" in update_data:
         update_fields["is_active"] = update_data["is_active"]
@@ -7790,14 +7794,30 @@ async def update_user(
     
     if "password" in update_data and update_data["password"]:
         update_fields["password_hash"] = get_password_hash(update_data["password"])
+
+    if "onboarding_completed" in update_data:
+        update_fields["onboarding_completed"] = bool(update_data["onboarding_completed"])
+
+    if update_data.get("clear_api_keys"):
+        unset_fields["google_api_key"] = ""
+        unset_fields["serper_api_key"] = ""
+        unset_fields["pappers_api_key"] = ""
+        update_fields["onboarding_completed"] = False
     
-    if update_fields:
-        await db.users.update_one(
-            {"id": user_id},
-            {"$set": update_fields}
-        )
+    if update_fields or unset_fields:
+        mongo_update = {}
+        if update_fields:
+            mongo_update["$set"] = update_fields
+        if unset_fields:
+            mongo_update["$unset"] = unset_fields
+
+        await db.users.update_one({"id": user_id}, mongo_update)
     
-    return {"success": True, "updated_fields": list(update_fields.keys())}
+    updated_fields = list(update_fields.keys())
+    if unset_fields:
+        updated_fields.append("api_keys_cleared")
+
+    return {"success": True, "updated_fields": updated_fields}
 
 @api_router.delete("/admin/users/{user_id}")
 async def delete_user(
