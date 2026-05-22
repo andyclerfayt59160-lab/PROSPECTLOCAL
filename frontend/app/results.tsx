@@ -82,6 +82,8 @@ interface Business {
   legal_presence_audited_at?: string;
   visibility_audited_at?: string;
   etat_administratif?: string;
+  interest_status?: string;
+  crm_status?: string;
 }
 
 interface Stats {
@@ -161,6 +163,16 @@ type FilterType = 'all' | 'no_pj' | 'no_website' | 'google_missing' | 'low_revie
 
 // View mode: verified / unverified / visite_terrain
 type ViewMode = 'verified' | 'unverified' | 'visite_terrain';
+
+type LocalityOption = {
+  key: string;
+  label: string;
+  count: number;
+};
+
+type ResultListItem =
+  | { type: 'section'; id: string; label: string; count: number }
+  | { type: 'business'; id: string; business: Business };
 
 const normalizeZoneLabel = (rawLabel: unknown): string => {
   const label = String(rawLabel || '').trim();
@@ -530,6 +542,8 @@ export default function ResultsScreen() {
   const [auditingTopLeads, setAuditingTopLeads] = useState(false);
   const [batchAuditSummary, setBatchAuditSummary] = useState('');
   const [hideAvoidLeads, setHideAvoidLeads] = useState(true);
+  const [groupByLocality, setGroupByLocality] = useState(false);
+  const [selectedLocality, setSelectedLocality] = useState<string>('all');
   const autoSelectedViewScanRef = React.useRef<string | null>(null);
 
   const currentViewCount = useMemo(() => {
@@ -707,13 +721,23 @@ export default function ResultsScreen() {
     setViewMode('verified');
     setBatchAuditSummary('');
     setHideAvoidLeads(true);
+    setGroupByLocality(false);
+    setSelectedLocality('all');
   }, [scanId]);
 
   useEffect(() => {
     applyFilter();
-  }, [businesses, unverifiedBusinesses, visiteTerrainBusinesses, activeFilter, viewMode]);
+  }, [activeFilter, businesses, hideAvoidLeads, sourceKind, unverifiedBusinesses, viewMode, visiteTerrainBusinesses]);
 
   const getEmptyStateMessage = () => {
+    if (selectedLocality !== 'all' && visibleBusinessCount === 0) {
+      const localityLabel = localityOptions.find((option) => option.key === selectedLocality)?.label || 'la localite choisie';
+      return {
+        title: `Aucun lead exploitable sur ${localityLabel}`,
+        subtitle: 'Essaie une autre localite ou repasse sur Toutes pour retrouver la shortlist complete.',
+      };
+    }
+
     if (activeFilter !== 'all') {
       return {
         title: 'Aucun résultat pour ce filtre',
@@ -766,6 +790,56 @@ export default function ResultsScreen() {
       default:
         return 2;
     }
+  };
+
+  const getLocalityKey = (item: Business): string => {
+    const rawCity = String(item.city || '').trim();
+    return rawCity ? rawCity.toUpperCase() : 'ZONE_NON_PRECISEE';
+  };
+
+  const getLocalityLabel = (item: Business): string => {
+    const rawCity = String(item.city || '').trim();
+    return rawCity || 'Zone non precisee';
+  };
+
+  const compareBusinesses = (left: Business, right: Business, localityFirst = false): number => {
+    if (sourceKind === 'web' && localityFirst) {
+      const leftCity = getLocalityLabel(left);
+      const rightCity = getLocalityLabel(right);
+      const cityComparison = leftCity.localeCompare(rightCity, 'fr', { sensitivity: 'base' });
+      if (cityComparison !== 0) {
+        return cityComparison;
+      }
+    }
+
+    if (sourceKind === 'web') {
+      const leftReadiness = getReadinessRank(left);
+      const rightReadiness = getReadinessRank(right);
+      if (leftReadiness !== rightReadiness) {
+        return leftReadiness - rightReadiness;
+      }
+
+      const leftLegal = getLegalRank(left);
+      const rightLegal = getLegalRank(right);
+      if (leftLegal !== rightLegal) {
+        return leftLegal - rightLegal;
+      }
+    }
+
+    const leftScore = left.solocal_priority_score ?? left.score ?? 0;
+    const rightScore = right.solocal_priority_score ?? right.score ?? 0;
+    if (leftScore !== rightScore) {
+      return rightScore - leftScore;
+    }
+
+    const leftDate = left.date_creation ? new Date(left.date_creation).getTime() : 0;
+    const rightDate = right.date_creation ? new Date(right.date_creation).getTime() : 0;
+
+    if (leftDate !== rightDate) {
+      return rightDate - leftDate;
+    }
+
+    return (left.name || '').localeCompare(right.name || '', 'fr', { sensitivity: 'base' });
   };
 
   const applyFilter = () => {
@@ -852,39 +926,110 @@ export default function ResultsScreen() {
       filtered = filtered.filter((business) => business.sales_readiness_status !== 'avoid');
     }
 
-    const sortedBusinesses = [...filtered].sort((left, right) => {
-      if (sourceKind === 'web') {
-        const leftReadiness = getReadinessRank(left);
-        const rightReadiness = getReadinessRank(right);
-        if (leftReadiness !== rightReadiness) {
-          return leftReadiness - rightReadiness;
-        }
-
-        const leftLegal = getLegalRank(left);
-        const rightLegal = getLegalRank(right);
-        if (leftLegal !== rightLegal) {
-          return leftLegal - rightLegal;
-        }
-      }
-
-      const leftScore = left.solocal_priority_score ?? left.score ?? 0;
-      const rightScore = right.solocal_priority_score ?? right.score ?? 0;
-      if (leftScore !== rightScore) {
-        return rightScore - leftScore;
-      }
-
-      const leftDate = left.date_creation ? new Date(left.date_creation).getTime() : 0;
-      const rightDate = right.date_creation ? new Date(right.date_creation).getTime() : 0;
-
-      if (leftDate !== rightDate) {
-        return rightDate - leftDate;
-      }
-
-      return (left.name || '').localeCompare(right.name || '');
-    });
+    const sortedBusinesses = [...filtered].sort((left, right) => compareBusinesses(left, right));
 
     setFilteredBusinesses(sortedBusinesses);
   };
+
+  const localityOptions = useMemo<LocalityOption[]>(() => {
+    if (sourceKind !== 'web') return [];
+
+    const counts = new Map<string, LocalityOption>();
+    for (const business of filteredBusinesses) {
+      const key = getLocalityKey(business);
+      const existing = counts.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        counts.set(key, {
+          key,
+          label: getLocalityLabel(business),
+          count: 1,
+        });
+      }
+    }
+
+    return Array.from(counts.values()).sort((left, right) => {
+      if (left.count !== right.count) {
+        return right.count - left.count;
+      }
+      return left.label.localeCompare(right.label, 'fr', { sensitivity: 'base' });
+    });
+  }, [filteredBusinesses, sourceKind]);
+
+  useEffect(() => {
+    if (selectedLocality === 'all') return;
+    const stillAvailable = localityOptions.some((option) => option.key === selectedLocality);
+    if (!stillAvailable) {
+      setSelectedLocality('all');
+    }
+  }, [localityOptions, selectedLocality]);
+
+  const displayedBusinesses = useMemo(() => {
+    let nextBusinesses = filteredBusinesses;
+
+    if (sourceKind === 'web' && selectedLocality !== 'all') {
+      nextBusinesses = filteredBusinesses.filter((business) => getLocalityKey(business) === selectedLocality);
+    }
+
+    if (sourceKind === 'web' && groupByLocality && selectedLocality === 'all') {
+      return [...nextBusinesses].sort((left, right) => compareBusinesses(left, right, true));
+    }
+
+    return nextBusinesses;
+  }, [compareBusinesses, filteredBusinesses, groupByLocality, selectedLocality, sourceKind]);
+
+  const listItems = useMemo<ResultListItem[]>(() => {
+    if (!(sourceKind === 'web' && groupByLocality && selectedLocality === 'all')) {
+      return displayedBusinesses.map((business) => ({
+        type: 'business',
+        id: business.id,
+        business,
+      }));
+    }
+
+    const nextItems: ResultListItem[] = [];
+    let currentKey = '';
+    let currentLabel = '';
+    let currentCount = 0;
+    let currentBusinesses: Business[] = [];
+
+    const flushSection = () => {
+      if (!currentKey) return;
+      nextItems.push({
+        type: 'section',
+        id: `section-${currentKey}`,
+        label: currentLabel,
+        count: currentCount,
+      });
+      currentBusinesses.forEach((business) => {
+        nextItems.push({
+          type: 'business',
+          id: business.id,
+          business,
+        });
+      });
+    };
+
+    displayedBusinesses.forEach((business) => {
+      const key = getLocalityKey(business);
+      if (key !== currentKey) {
+        flushSection();
+        currentKey = key;
+        currentLabel = getLocalityLabel(business);
+        currentBusinesses = [business];
+        currentCount = 1;
+      } else {
+        currentBusinesses.push(business);
+        currentCount += 1;
+      }
+    });
+
+    flushSection();
+    return nextItems;
+  }, [displayedBusinesses, groupByLocality, selectedLocality, sourceKind]);
+
+  const visibleBusinessCount = displayedBusinesses.length;
 
   // Determine if business is a "max opportunity"
   const isOpportunityMax = (b: Business): boolean => {
@@ -1153,6 +1298,15 @@ export default function ResultsScreen() {
     });
   };
 
+  const patchBusinessInLists = (businessId: string, updates: Partial<Business>) => {
+    const applyUpdates = (items: Business[]) =>
+      items.map((business) => (business.id === businessId ? { ...business, ...updates } : business));
+
+    setBusinesses((prev) => applyUpdates(prev));
+    setUnverifiedBusinesses((prev) => applyUpdates(prev));
+    setVisiteTerrainBusinesses((prev) => applyUpdates(prev));
+  };
+
   const handleToggleContacted = async (item: Business) => {
     const newStatus = item.contact_status_manual === 'contacted' ? 'not_contacted' : 'contacted';
     
@@ -1163,9 +1317,7 @@ export default function ResultsScreen() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
-      setBusinesses(prev => prev.map(b => 
-        b.id === item.id ? { ...b, contact_status_manual: newStatus } : b
-      ));
+      patchBusinessInLists(item.id, { contact_status_manual: newStatus });
     } catch (error) {
       console.error('Error updating contact status:', error);
     }
@@ -1192,10 +1344,10 @@ export default function ResultsScreen() {
                 
                 if (!includeClients) {
                   setBusinesses(prev => prev.filter(b => b.id !== item.id));
+                  setUnverifiedBusinesses(prev => prev.filter(b => b.id !== item.id));
+                  setVisiteTerrainBusinesses(prev => prev.filter(b => b.id !== item.id));
                 } else {
-                  setBusinesses(prev => prev.map(b => 
-                    b.id === item.id ? { ...b, client_status: newStatus } : b
-                  ));
+                  patchBusinessInLists(item.id, { client_status: newStatus });
                 }
               } catch (error) {
                 console.error('Error updating client status:', error);
@@ -1212,12 +1364,62 @@ export default function ResultsScreen() {
           { headers: { Authorization: `Bearer ${token}` } }
         );
         
-        setBusinesses(prev => prev.map(b => 
-          b.id === item.id ? { ...b, client_status: newStatus } : b
-        ));
+        patchBusinessInLists(item.id, { client_status: newStatus });
       } catch (error) {
         console.error('Error updating client status:', error);
       }
+    }
+  };
+
+  const handleQuickCall = async (item: Business) => {
+    if (!item.phone) {
+      handleRowPress(item);
+      return;
+    }
+
+    try {
+      await Linking.openURL(`tel:${item.phone}`);
+      if (item.contact_status_manual !== 'contacted') {
+        await handleToggleContacted(item);
+      }
+      showToast(`Appel lance vers ${item.name}.`, 'success');
+    } catch (error) {
+      console.error('Error launching call:', error);
+      showToast("Impossible de lancer l'appel.", 'error');
+    }
+  };
+
+  const handleMarkInCrm = async (item: Business) => {
+    const newStatus = item.crm_status === 'in_crm' ? 'not_in_crm' : 'in_crm';
+
+    try {
+      await axios.patch(
+        `${API_URL}/api/businesses/${item.id}/status`,
+        { crm_status: newStatus },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      await loadBusinesses();
+      showToast(newStatus === 'in_crm' ? `${item.name} passe en CRM.` : `${item.name} sort du CRM.`, 'success');
+    } catch (error) {
+      console.error('Error updating CRM status:', error);
+      showToast("Impossible de mettre a jour le statut CRM.", 'error');
+    }
+  };
+
+  const handleMoveToTerrain = async (item: Business) => {
+    try {
+      await axios.patch(
+        `${API_URL}/api/businesses/${item.id}/move-to-visite`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      await loadBusinesses();
+      setViewMode('visite_terrain');
+      setActiveFilter('field');
+      showToast(`${item.name} a ete envoye en terrain.`, 'success');
+    } catch (error) {
+      console.error('Error moving business to terrain:', error);
+      showToast("Impossible d'envoyer ce lead en terrain.", 'error');
     }
   };
 
@@ -1356,6 +1558,8 @@ export default function ResultsScreen() {
       const legalBadge = getLegalBadgeMeta(item);
       const recommendedOffer = item.recommended_offer_code ? OFFER_META[item.recommended_offer_code] : null;
       const salesReadiness = item.sales_readiness_status ? SALES_READINESS_META[item.sales_readiness_status] : null;
+      const crmTracked = item.crm_status === 'in_crm';
+      const canSendToTerrain = viewMode !== 'visite_terrain' && item.sales_readiness_status !== 'field';
     
     return (
       <TouchableOpacity 
@@ -1490,6 +1694,62 @@ export default function ResultsScreen() {
               </Text>
             </TouchableOpacity>
           )}
+          {sourceKind === 'web' ? (
+            <View style={styles.quickActionRow}>
+              <TouchableOpacity
+                style={[styles.quickActionButton, styles.quickActionButtonCall]}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  handleQuickCall(item);
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name={item.phone ? 'call-outline' : 'document-text-outline'}
+                  size={13}
+                  color="#065F46"
+                />
+                <Text style={styles.quickActionButtonCallText}>
+                  {item.phone ? 'Appeler' : 'Fiche'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.quickActionButton,
+                  crmTracked ? styles.quickActionButtonCrmActive : styles.quickActionButtonCrm,
+                ]}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  handleMarkInCrm(item);
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name={crmTracked ? 'briefcase' : 'briefcase-outline'}
+                  size={13}
+                  color={crmTracked ? '#FFFFFF' : '#1D4ED8'}
+                />
+                <Text style={[styles.quickActionButtonCrmText, crmTracked && styles.quickActionButtonCrmTextActive]}>
+                  {crmTracked ? 'Dans CRM' : 'Mettre CRM'}
+                </Text>
+              </TouchableOpacity>
+
+              {canSendToTerrain ? (
+                <TouchableOpacity
+                  style={[styles.quickActionButton, styles.quickActionButtonField]}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    handleMoveToTerrain(item);
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="walk-outline" size={13} color="#6D28D9" />
+                  <Text style={styles.quickActionButtonFieldText}>Terrain</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.cellPriority}>
@@ -1545,6 +1805,24 @@ export default function ResultsScreen() {
 
       </TouchableOpacity>
     );
+  };
+
+  const renderLocalitySection = (label: string, count: number) => (
+    <View style={styles.localitySectionHeader}>
+      <View style={styles.localitySectionTitleWrap}>
+        <Ionicons name="location-outline" size={14} color="#4338CA" />
+        <Text style={styles.localitySectionTitle}>{label}</Text>
+      </View>
+      <Text style={styles.localitySectionCount}>{count} lead{count > 1 ? 's' : ''}</Text>
+    </View>
+  );
+
+  const renderListItem = ({ item }: { item: ResultListItem }) => {
+    if (item.type === 'section') {
+      return renderLocalitySection(item.label, item.count);
+    }
+
+    return renderBusinessRow({ item: item.business });
   };
 
   if (loading) {
@@ -1607,7 +1885,7 @@ export default function ResultsScreen() {
         period={scanSummary.period}
         viewLabel={currentViewLabel}
         currentViewCount={currentViewCount}
-        filteredCount={filteredBusinesses.length}
+        filteredCount={visibleBusinessCount}
         coverage={scanSummary.coverage}
         resultMix={scanSummary.resultMix}
         diagnosticMix={scanSummary.diagnosticMix}
@@ -1683,20 +1961,37 @@ export default function ResultsScreen() {
                 Passe directement sur les leads a appeler, a recouper ou a visiter sans te noyer dans le reste.
               </Text>
             </View>
-            <TouchableOpacity
-              style={[styles.shortlistToggleButton, hideAvoidLeads && styles.shortlistToggleButtonActive]}
-              onPress={() => setHideAvoidLeads((current) => !current)}
-              activeOpacity={0.8}
-            >
-              <Ionicons
-                name={hideAvoidLeads ? 'eye-off-outline' : 'eye-outline'}
-                size={16}
-                color={hideAvoidLeads ? '#FFF' : '#6366F1'}
-              />
-              <Text style={[styles.shortlistToggleText, hideAvoidLeads && styles.shortlistToggleTextActive]}>
-                {hideAvoidLeads ? 'A eviter masques' : 'Afficher tout'}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.shortlistToggleStack}>
+              <TouchableOpacity
+                style={[styles.shortlistToggleButton, hideAvoidLeads && styles.shortlistToggleButtonActive]}
+                onPress={() => setHideAvoidLeads((current) => !current)}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name={hideAvoidLeads ? 'eye-off-outline' : 'eye-outline'}
+                  size={16}
+                  color={hideAvoidLeads ? '#FFF' : '#6366F1'}
+                />
+                <Text style={[styles.shortlistToggleText, hideAvoidLeads && styles.shortlistToggleTextActive]}>
+                  {hideAvoidLeads ? 'A eviter masques' : 'Afficher tout'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.shortlistToggleButton, groupByLocality && styles.shortlistToggleButtonActive]}
+                onPress={() => setGroupByLocality((current) => !current)}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name={groupByLocality ? 'git-branch-outline' : 'git-branch-outline'}
+                  size={16}
+                  color={groupByLocality ? '#FFF' : '#6366F1'}
+                />
+                <Text style={[styles.shortlistToggleText, groupByLocality && styles.shortlistToggleTextActive]}>
+                  {groupByLocality ? 'Par localite' : 'Grouper villes'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.shortlistActions}>
@@ -1740,11 +2035,55 @@ export default function ResultsScreen() {
             </TouchableOpacity>
           </View>
 
+          {localityOptions.length > 0 ? (
+            <View style={styles.localityFocusWrap}>
+              <Text style={styles.localityFocusTitle}>Focus localite</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.localityFocusChips}>
+                <TouchableOpacity
+                  style={[styles.localityChip, selectedLocality === 'all' && styles.localityChipActive]}
+                  onPress={() => setSelectedLocality('all')}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.localityChipText, selectedLocality === 'all' && styles.localityChipTextActive]}>
+                    Toutes
+                  </Text>
+                  <Text style={[styles.localityChipCount, selectedLocality === 'all' && styles.localityChipTextActive]}>
+                    {filteredBusinesses.length}
+                  </Text>
+                </TouchableOpacity>
+
+                {localityOptions.slice(0, 8).map((option) => (
+                  <TouchableOpacity
+                    key={option.key}
+                    style={[styles.localityChip, selectedLocality === option.key && styles.localityChipActive]}
+                    onPress={() => setSelectedLocality(option.key)}
+                    activeOpacity={0.85}
+                  >
+                    <Text
+                      style={[styles.localityChipText, selectedLocality === option.key && styles.localityChipTextActive]}
+                      numberOfLines={1}
+                    >
+                      {option.label}
+                    </Text>
+                    <Text style={[styles.localityChipCount, selectedLocality === option.key && styles.localityChipTextActive]}>
+                      {option.count}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+
           {(stats?.readiness_avoid || 0) > 0 ? (
             <Text style={styles.shortlistFootnote}>
               {hideAvoidLeads
                 ? `${stats?.readiness_avoid || 0} lead(s) a eviter sont masques de la liste principale.`
                 : `${stats?.readiness_avoid || 0} lead(s) a eviter restent visibles si tu veux les controler.`}
+            </Text>
+          ) : null}
+          {selectedLocality !== 'all' ? (
+            <Text style={styles.shortlistFootnote}>
+              Focus actif sur {localityOptions.find((option) => option.key === selectedLocality)?.label || 'la localite selectionnee'} • {visibleBusinessCount} lead(s).
             </Text>
           ) : null}
         </View>
@@ -1781,7 +2120,7 @@ export default function ResultsScreen() {
       </View>
 
       {/* Business List */}
-      {filteredBusinesses.length === 0 ? (
+      {visibleBusinessCount === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="search-outline" size={48} color="#999" />
           <Text style={styles.emptyStateText}>{getEmptyStateMessage().title}</Text>
@@ -1796,6 +2135,7 @@ export default function ResultsScreen() {
               onPress={() => {
                 setActiveFilter('all');
                 setViewMode('verified');
+                setSelectedLocality('all');
               }}
             >
               <Text style={styles.emptySecondaryActionText}>Réinitialiser les filtres</Text>
@@ -1804,9 +2144,9 @@ export default function ResultsScreen() {
         </View>
       ) : (
         <FlatList
-          data={filteredBusinesses}
+          data={listItems}
           keyExtractor={(item) => item.id}
-          renderItem={renderBusinessRow}
+          renderItem={renderListItem}
           contentContainerStyle={styles.tableBody}
           style={listFocusMode ? styles.resultsListFocused : undefined}
         />
@@ -2433,6 +2773,32 @@ const styles = StyleSheet.create({
     color: '#9C27B0',
     maxWidth: 100,
   },
+  localitySectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#EEF2FF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#D9E2FF',
+  },
+  localitySectionTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  localitySectionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#4338CA',
+  },
+  localitySectionCount: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6366F1',
+  },
   emptyText: {
     fontSize: 13,
     color: '#999',
@@ -2470,6 +2836,55 @@ const styles = StyleSheet.create({
   },
   actionButtonClient: {
     backgroundColor: '#FF9800',
+  },
+  quickActionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  quickActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  quickActionButtonCall: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  quickActionButtonCallText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#065F46',
+  },
+  quickActionButtonCrm: {
+    backgroundColor: '#EFF6FF',
+    borderColor: '#BFDBFE',
+  },
+  quickActionButtonCrmActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#2563EB',
+  },
+  quickActionButtonCrmText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1D4ED8',
+  },
+  quickActionButtonCrmTextActive: {
+    color: '#FFFFFF',
+  },
+  quickActionButtonField: {
+    backgroundColor: '#F5F3FF',
+    borderColor: '#DDD6FE',
+  },
+  quickActionButtonFieldText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6D28D9',
   },
   emptyContainer: {
     flex: 1,
@@ -2770,6 +3185,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
   },
+  shortlistToggleStack: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
   shortlistTextWrap: {
     flex: 1,
     gap: 6,
@@ -2844,6 +3263,49 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#64748B',
     fontWeight: '600',
+  },
+  localityFocusWrap: {
+    gap: 8,
+  },
+  localityFocusTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#475569',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  localityFocusChips: {
+    gap: 8,
+    paddingRight: 6,
+  },
+  localityChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  localityChipActive: {
+    backgroundColor: '#4338CA',
+    borderColor: '#4338CA',
+  },
+  localityChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
+    maxWidth: 120,
+  },
+  localityChipCount: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#6366F1',
+  },
+  localityChipTextActive: {
+    color: '#FFFFFF',
   },
   // View Mode Tabs styles
   viewModeTabs: {
