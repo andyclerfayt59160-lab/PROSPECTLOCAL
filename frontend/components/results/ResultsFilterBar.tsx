@@ -16,6 +16,10 @@ type StatsLike = {
   offer_google_business?: number;
   offer_website?: number;
   offer_google_reviews?: number;
+  readiness_ready_call?: number;
+  readiness_review?: number;
+  readiness_field?: number;
+  readiness_avoid?: number;
 };
 
 type Props = {
@@ -134,6 +138,50 @@ export default function ResultsFilterBar({
           >
             <Text style={[styles.filterPillText, styles.filterPillTextGreen, activeFilter === 'offer_google_reviews' && styles.filterPillTextActive]}>
               Google et avis ({stats.offer_google_reviews || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.readiness_ready_call || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillGreen, activeFilter === 'ready_call' && styles.filterPillGreenActive]}
+            onPress={() => onChangeFilter('ready_call')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextGreen, activeFilter === 'ready_call' && styles.filterPillTextActive]}>
+              Pret a appeler ({stats.readiness_ready_call || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.readiness_review || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillAmber, activeFilter === 'review' && styles.filterPillAmberActive]}
+            onPress={() => onChangeFilter('review')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextAmber, activeFilter === 'review' && styles.filterPillTextActive]}>
+              A recouper ({stats.readiness_review || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.readiness_field || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillPurple, activeFilter === 'field' && styles.filterPillPurpleActive]}
+            onPress={() => onChangeFilter('field')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextPurple, activeFilter === 'field' && styles.filterPillTextActive]}>
+              A visiter ({stats.readiness_field || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.readiness_avoid || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillRed, activeFilter === 'avoid' && styles.filterPillRedActive]}
+            onPress={() => onChangeFilter('avoid')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextRed, activeFilter === 'avoid' && styles.filterPillTextActive]}>
+              A eviter ({stats.readiness_avoid || 0})
             </Text>
           </TouchableOpacity>
         ) : null}

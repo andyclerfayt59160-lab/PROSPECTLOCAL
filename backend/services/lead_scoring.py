@@ -232,6 +232,75 @@ def _build_offer_recommendation(
     )
 
 
+def _build_sales_readiness(
+    *,
+    legal_status: str,
+    phone_reliability_status: str,
+    contact_route: str,
+    is_terrain: bool,
+    client_status: str,
+    crm_status: str,
+) -> tuple[str, str, str]:
+    if client_status == "client":
+        return (
+            "avoid",
+            "A eviter",
+            "Deja client : ne pas retraiter commercialement dans cette liste.",
+        )
+
+    if crm_status == "in_crm":
+        return (
+            "avoid",
+            "A eviter",
+            "Deja dans le CRM : priorite a une reprise via le suivi existant.",
+        )
+
+    if legal_status == "closed":
+        return (
+            "avoid",
+            "A eviter",
+            "Entreprise inactive ou radiee : ne pas prioriser sans verification complementaire.",
+        )
+
+    if is_terrain or contact_route == "terrain":
+        return (
+            "field",
+            "A visiter",
+            "Le lead parait reel mais demande un passage terrain pour recuperer la bonne coordonnee.",
+        )
+
+    if (
+        legal_status == "confirmed"
+        and contact_route == "direct"
+        and phone_reliability_status == "verified"
+    ):
+        return (
+            "ready_call",
+            "Pret a appeler",
+            "Lead legalement confirme avec telephone exploitable immediatement.",
+        )
+
+    if contact_route == "rebound":
+        return (
+            "review",
+            "A recouper",
+            "Le meilleur angle passe d'abord par un rebond ou une piste liee a valider.",
+        )
+
+    if legal_status in {"missing", "warning", "unknown"} or phone_reliability_status in {"review", "missing", "rejected"}:
+        return (
+            "review",
+            "A recouper",
+            "Verifier la legitimite ou la coordonnee avant de lancer la relance commerciale.",
+        )
+
+    return (
+        "review",
+        "A recouper",
+        "Le lead a besoin d'une verification rapide avant traitement commercial.",
+    )
+
+
 def build_solocal_priority_metadata(business: dict) -> dict:
     """
     Build a commercial priority aligned with local digital visibility gaps.
@@ -461,6 +530,15 @@ def build_solocal_priority_metadata(business: dict) -> dict:
             phone_reliability_label = "Fiable"
             phone_reliability_reason = "Numero tracable avec source exploitable."
 
+    sales_readiness_status, sales_readiness_label, sales_readiness_reason = _build_sales_readiness(
+        legal_status=legal_status,
+        phone_reliability_status=phone_reliability_status,
+        contact_route=contact_route,
+        is_terrain=is_terrain,
+        client_status=business.get("client_status") or "not_client",
+        crm_status=business.get("crm_status") or "not_in_crm",
+    )
+
     if score >= 70:
         label = "Priorite haute"
     elif score >= 45:
@@ -504,4 +582,7 @@ def build_solocal_priority_metadata(business: dict) -> dict:
         "phone_reliability_status": phone_reliability_status,
         "phone_reliability_label": phone_reliability_label,
         "phone_reliability_reason": phone_reliability_reason,
+        "sales_readiness_status": sales_readiness_status,
+        "sales_readiness_label": sales_readiness_label,
+        "sales_readiness_reason": sales_readiness_reason,
     }

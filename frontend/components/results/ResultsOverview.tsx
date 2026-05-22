@@ -15,6 +15,10 @@ type Props = {
   offerGoogleBusiness: number;
   offerWebsite: number;
   offerGoogleReviews: number;
+  readinessReadyCall: number;
+  readinessReview: number;
+  readinessField: number;
+  readinessAvoid: number;
   currentViewLabel: string;
   currentViewCount: number;
 };
@@ -33,6 +37,10 @@ export default function ResultsOverview({
   offerGoogleBusiness,
   offerWebsite,
   offerGoogleReviews,
+  readinessReadyCall,
+  readinessReview,
+  readinessField,
+  readinessAvoid,
   currentViewLabel,
   currentViewCount,
 }: Props) {
@@ -50,6 +58,8 @@ export default function ResultsOverview({
   const showAuditDetails = auditedVisibility > 0 || legalConfirmed > 0 || legalMissing > 0;
   const showOfferDetails =
     offerPackVisibility > 0 || offerGoogleBusiness > 0 || offerWebsite > 0 || offerGoogleReviews > 0;
+  const showReadinessDetails =
+    readinessReadyCall > 0 || readinessReview > 0 || readinessField > 0 || readinessAvoid > 0;
 
   return (
     <View style={styles.statsBar}>
@@ -67,10 +77,22 @@ export default function ResultsOverview({
           <Text style={styles.statsVisiteTerrain}>{totalVisiteTerrain}</Text> visite terrain
         </Text>
       </View>
-      {opportunityMax > 0 || showAuditDetails || showOfferDetails ? (
+      {opportunityMax > 0 || showAuditDetails || showOfferDetails || showReadinessDetails ? (
         <View style={styles.statsDetails}>
           {opportunityMax > 0 ? (
             <Text style={styles.statItemWarm}>🔥 {opportunityMax} opportunites max</Text>
+          ) : null}
+          {readinessReadyCall > 0 ? (
+            <Text style={styles.statItemSuccess}>Pret a appeler: {readinessReadyCall}</Text>
+          ) : null}
+          {readinessReview > 0 ? (
+            <Text style={styles.statItemWarning}>A recouper: {readinessReview}</Text>
+          ) : null}
+          {readinessField > 0 ? (
+            <Text style={styles.statItemPurple}>A visiter: {readinessField}</Text>
+          ) : null}
+          {readinessAvoid > 0 ? (
+            <Text style={styles.statItemDanger}>A eviter: {readinessAvoid}</Text>
           ) : null}
           {offerPackVisibility > 0 ? (
             <Text style={styles.statItemPurple}>Pack visibilite: {offerPackVisibility}</Text>
@@ -176,6 +198,11 @@ const styles = StyleSheet.create({
   statItemWarning: {
     fontSize: 14,
     color: '#B45309',
+    fontWeight: '700',
+  },
+  statItemDanger: {
+    fontSize: 14,
+    color: '#B91C1C',
     fontWeight: '700',
   },
   listFocusBanner: {

@@ -63,6 +63,9 @@ interface Business {
   recommended_offer_code?: 'pack_visibility' | 'google_business' | 'website' | 'google_reviews' | 'local_visibility' | 'diagnostic' | 'recouper' | 'inactive';
   recommended_offer_label?: string;
   recommended_offer_reason?: string;
+  sales_readiness_status?: 'ready_call' | 'review' | 'field' | 'avoid';
+  sales_readiness_label?: string;
+  sales_readiness_reason?: string;
   recommended_contact_mode?: 'appel' | 'visite' | 'creuser' | 'verifier';
   related_clue_potential?: boolean;
   related_clue_reason?: string;
@@ -104,6 +107,10 @@ interface Stats {
   offer_google_business: number;
   offer_website: number;
   offer_google_reviews: number;
+  readiness_ready_call: number;
+  readiness_review: number;
+  readiness_field: number;
+  readiness_avoid: number;
 }
 
 interface ScanDiagnostics {
@@ -150,7 +157,7 @@ interface ScanRecord {
 }
 
 // Filter types
-type FilterType = 'all' | 'no_pj' | 'no_website' | 'google_missing' | 'low_reviews' | 'opportunity_max' | 'new' | 'visite_terrain' | 'pappers' | 'rebound' | 'fragile' | 'legal_confirmed' | 'legal_missing' | 'audited' | 'offer_pack_visibility' | 'offer_google_business' | 'offer_website' | 'offer_google_reviews';
+type FilterType = 'all' | 'no_pj' | 'no_website' | 'google_missing' | 'low_reviews' | 'opportunity_max' | 'new' | 'visite_terrain' | 'pappers' | 'rebound' | 'fragile' | 'legal_confirmed' | 'legal_missing' | 'audited' | 'offer_pack_visibility' | 'offer_google_business' | 'offer_website' | 'offer_google_reviews' | 'ready_call' | 'review' | 'field' | 'avoid';
 
 // View mode: verified / unverified / visite_terrain
 type ViewMode = 'verified' | 'unverified' | 'visite_terrain';
@@ -474,6 +481,13 @@ const OFFER_META: Record<string, { color: string; bg: string; icon: keyof typeof
   inactive: { color: '#991B1B', bg: '#FEE2E2', icon: 'close-circle-outline' },
 };
 
+const SALES_READINESS_META: Record<string, { color: string; bg: string; icon: keyof typeof Ionicons.glyphMap }> = {
+  ready_call: { color: '#047857', bg: '#D1FAE5', icon: 'call-outline' },
+  review: { color: '#B45309', bg: '#FEF3C7', icon: 'search-outline' },
+  field: { color: '#6D28D9', bg: '#EDE9FE', icon: 'walk-outline' },
+  avoid: { color: '#B91C1C', bg: '#FEE2E2', icon: 'ban-outline' },
+};
+
 type PJState = 'present' | 'absent' | 'unknown';
 type LegalState = 'confirmed' | 'missing' | 'warning' | 'closed' | 'unknown';
 
@@ -754,6 +768,18 @@ export default function ResultsScreen() {
       case 'offer_google_reviews':
         filtered = sourceList.filter(b => b.recommended_offer_code === 'google_reviews');
         break;
+      case 'ready_call':
+        filtered = sourceList.filter(b => b.sales_readiness_status === 'ready_call');
+        break;
+      case 'review':
+        filtered = sourceList.filter(b => b.sales_readiness_status === 'review');
+        break;
+      case 'field':
+        filtered = sourceList.filter(b => b.sales_readiness_status === 'field');
+        break;
+      case 'avoid':
+        filtered = sourceList.filter(b => b.sales_readiness_status === 'avoid');
+        break;
       case 'low_reviews':
         filtered = sourceList.filter(b => (b.google_reviews_count || 0) < 5);
         break;
@@ -963,6 +989,10 @@ export default function ResultsScreen() {
       const offerGoogleBusiness = allBusinesses.filter((b: Business) => b.recommended_offer_code === 'google_business').length;
       const offerWebsite = allBusinesses.filter((b: Business) => b.recommended_offer_code === 'website').length;
       const offerGoogleReviews = allBusinesses.filter((b: Business) => b.recommended_offer_code === 'google_reviews').length;
+      const readinessReadyCall = allBusinesses.filter((b: Business) => b.sales_readiness_status === 'ready_call').length;
+      const readinessReview = allBusinesses.filter((b: Business) => b.sales_readiness_status === 'review').length;
+      const readinessField = allBusinesses.filter((b: Business) => b.sales_readiness_status === 'field').length;
+      const readinessAvoid = allBusinesses.filter((b: Business) => b.sales_readiness_status === 'avoid').length;
       
       setStats({
         ...response.data.stats,
@@ -984,6 +1014,10 @@ export default function ResultsScreen() {
             offer_google_business: offerGoogleBusiness,
             offer_website: offerWebsite,
             offer_google_reviews: offerGoogleReviews,
+            readiness_ready_call: readinessReadyCall,
+            readiness_review: readinessReview,
+            readiness_field: readinessField,
+            readiness_avoid: readinessAvoid,
           });
     } catch (error) {
       console.error('Error loading results:', error);
@@ -1269,6 +1303,7 @@ export default function ResultsScreen() {
       const phoneReliability = item.phone_reliability_status ? PHONE_RELIABILITY_META[item.phone_reliability_status] : null;
       const legalBadge = getLegalBadgeMeta(item);
       const recommendedOffer = item.recommended_offer_code ? OFFER_META[item.recommended_offer_code] : null;
+      const salesReadiness = item.sales_readiness_status ? SALES_READINESS_META[item.sales_readiness_status] : null;
     
     return (
       <TouchableOpacity 
@@ -1369,6 +1404,14 @@ export default function ResultsScreen() {
                 <Ionicons name={recommendedOffer.icon} size={12} color={recommendedOffer.color} />
                 <Text style={[styles.offerBadgeText, { color: recommendedOffer.color }]} numberOfLines={1}>
                   {item.recommended_offer_label}
+                </Text>
+              </View>
+            ) : null}
+            {salesReadiness && !!item.sales_readiness_label ? (
+              <View style={[styles.readinessBadge, { backgroundColor: salesReadiness.bg }]}>
+                <Ionicons name={salesReadiness.icon} size={12} color={salesReadiness.color} />
+                <Text style={[styles.readinessBadgeText, { color: salesReadiness.color }]} numberOfLines={1}>
+                  {item.sales_readiness_label}
                 </Text>
               </View>
             ) : null}
@@ -1540,6 +1583,10 @@ export default function ResultsScreen() {
         offerGoogleBusiness={stats?.offer_google_business || 0}
         offerWebsite={stats?.offer_website || 0}
         offerGoogleReviews={stats?.offer_google_reviews || 0}
+        readinessReadyCall={stats?.readiness_ready_call || 0}
+        readinessReview={stats?.readiness_review || 0}
+        readinessField={stats?.readiness_field || 0}
+        readinessAvoid={stats?.readiness_avoid || 0}
         currentViewLabel={currentViewLabel}
         currentViewCount={currentViewCount}
       />
@@ -2148,6 +2195,20 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   offerBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  readinessBadge: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  readinessBadgeText: {
     fontSize: 11,
     fontWeight: '700',
   },
