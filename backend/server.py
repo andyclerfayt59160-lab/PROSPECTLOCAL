@@ -7780,6 +7780,18 @@ async def update_user(
 
     if user_id == current_user["sub"] and update_data.get("role") == "user":
         raise HTTPException(status_code=400, detail="Vous ne pouvez pas retirer vos propres droits admin")
+
+    other_active_admins = await db.users.count_documents({
+        "role": "admin",
+        "id": {"$ne": user_id},
+        "is_active": {"$ne": False},
+    })
+
+    if user.get("role") == "admin" and update_data.get("is_active") is False and other_active_admins == 0:
+        raise HTTPException(status_code=400, detail="Impossible de désactiver le dernier admin actif")
+
+    if user.get("role") == "admin" and update_data.get("role") == "user" and other_active_admins == 0:
+        raise HTTPException(status_code=400, detail="Impossible de retirer les droits du dernier admin actif")
     
     # Build update dict
     update_fields = {}
@@ -7832,6 +7844,14 @@ async def delete_user(
     # Prevent admin from deleting themselves
     if user_id == current_user["sub"]:
         raise HTTPException(status_code=400, detail="Vous ne pouvez pas supprimer votre propre compte")
+
+    other_active_admins = await db.users.count_documents({
+        "role": "admin",
+        "id": {"$ne": user_id},
+        "is_active": {"$ne": False},
+    })
+    if user.get("role") == "admin" and user.get("is_active", True) is not False and other_active_admins == 0:
+        raise HTTPException(status_code=400, detail="Impossible de supprimer le dernier admin actif")
     
     # Delete all user data
     # 1. Get all user scans

@@ -193,6 +193,7 @@ export default function AdminScreen() {
       setUsers(prev => prev.map(u => 
         u.id === user.id ? { ...u, is_active: newStatus } : u
       ));
+      loadData();
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Erreur';
       if (Platform.OS === 'web') {
@@ -292,6 +293,7 @@ export default function AdminScreen() {
 
       // Remove from pending list
       setPendingUsers(prev => prev.filter(u => u.id !== userId));
+      loadData();
 
       if (Platform.OS === 'web') {
         window.alert(`La demande de ${email} a été refusée`);
@@ -396,6 +398,7 @@ export default function AdminScreen() {
       );
 
       setUsers(prev => prev.filter(u => u.id !== user.id));
+      loadData();
       
       if (Platform.OS === 'web') {
         window.alert('✅ Utilisateur supprimé');
