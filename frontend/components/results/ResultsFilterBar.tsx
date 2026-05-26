@@ -12,6 +12,7 @@ type StatsLike = {
   legal_confirmed?: number;
   legal_missing?: number;
   audited_visibility?: number;
+  needs_audit?: number;
   offer_pack_visibility?: number;
   offer_google_business?: number;
   offer_website?: number;
@@ -257,6 +258,17 @@ export default function ResultsFilterBar({
           >
             <Text style={[styles.filterPillText, styles.filterPillTextBlue, activeFilter === 'audited' && styles.filterPillTextActive]}>
               🧭 Audites ({stats.audited_visibility || 0})
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
+        {stats && (stats.needs_audit || 0) > 0 ? (
+          <TouchableOpacity
+            style={[styles.filterPill, styles.filterPillBlue, activeFilter === 'needs_audit' && styles.filterPillBlueActive]}
+            onPress={() => onChangeFilter('needs_audit')}
+          >
+            <Text style={[styles.filterPillText, styles.filterPillTextBlue, activeFilter === 'needs_audit' && styles.filterPillTextActive]}>
+              A auditer ({stats.needs_audit || 0})
             </Text>
           </TouchableOpacity>
         ) : null}

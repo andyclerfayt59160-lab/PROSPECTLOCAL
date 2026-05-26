@@ -11,6 +11,7 @@ type Props = {
   legalConfirmed: number;
   legalMissing: number;
   auditedVisibility: number;
+  needsAudit: number;
   offerPackVisibility: number;
   offerGoogleBusiness: number;
   offerWebsite: number;
@@ -33,6 +34,7 @@ export default function ResultsOverview({
   legalConfirmed,
   legalMissing,
   auditedVisibility,
+  needsAudit,
   offerPackVisibility,
   offerGoogleBusiness,
   offerWebsite,
@@ -55,7 +57,7 @@ export default function ResultsOverview({
     );
   }
 
-  const showAuditDetails = auditedVisibility > 0 || legalConfirmed > 0 || legalMissing > 0;
+  const showAuditDetails = auditedVisibility > 0 || legalConfirmed > 0 || legalMissing > 0 || needsAudit > 0;
   const showOfferDetails =
     offerPackVisibility > 0 || offerGoogleBusiness > 0 || offerWebsite > 0 || offerGoogleReviews > 0;
   const showReadinessDetails =
@@ -108,6 +110,9 @@ export default function ResultsOverview({
           ) : null}
           {auditedVisibility > 0 ? (
             <Text style={styles.statItemInfo}>Audit visibility: {auditedVisibility}</Text>
+          ) : null}
+          {needsAudit > 0 ? (
+            <Text style={styles.statItemBlue}>A auditer: {needsAudit}</Text>
           ) : null}
           {legalConfirmed > 0 ? (
             <Text style={styles.statItemSuccess}>Legales confirmees: {legalConfirmed}</Text>

@@ -104,6 +104,7 @@ interface Stats {
   legal_confirmed: number;
   legal_missing: number;
   audited_visibility: number;
+  needs_audit: number;
   google_missing: number;
   offer_pack_visibility: number;
   offer_google_business: number;
@@ -159,7 +160,7 @@ interface ScanRecord {
 }
 
 // Filter types
-type FilterType = 'all' | 'no_pj' | 'no_website' | 'google_missing' | 'low_reviews' | 'opportunity_max' | 'new' | 'visite_terrain' | 'pappers' | 'rebound' | 'fragile' | 'legal_confirmed' | 'legal_missing' | 'audited' | 'offer_pack_visibility' | 'offer_google_business' | 'offer_website' | 'offer_google_reviews' | 'ready_call' | 'review' | 'field' | 'avoid';
+type FilterType = 'all' | 'no_pj' | 'no_website' | 'google_missing' | 'low_reviews' | 'opportunity_max' | 'new' | 'visite_terrain' | 'pappers' | 'rebound' | 'fragile' | 'legal_confirmed' | 'legal_missing' | 'audited' | 'needs_audit' | 'offer_pack_visibility' | 'offer_google_business' | 'offer_website' | 'offer_google_reviews' | 'ready_call' | 'review' | 'field' | 'avoid';
 
 // View mode: verified / unverified / visite_terrain
 type ViewMode = 'verified' | 'unverified' | 'visite_terrain';
@@ -940,6 +941,9 @@ export default function ResultsScreen() {
       case 'audited':
         filtered = sourceList.filter(b => !!b.visibility_audited_at || !!b.legal_presence_audited_at);
         break;
+      case 'needs_audit':
+        filtered = sourceList.filter(b => needsQuickAudit(b));
+        break;
       case 'visite_terrain':
         filtered = sourceList.filter(b => b.lead_type === 'visite_terrain' || (!b.phone && b.address));
         break;
@@ -1334,6 +1338,7 @@ export default function ResultsScreen() {
       const legalConfirmed = allBusinesses.filter((b: Business) => getLegalState(b) === 'confirmed').length;
       const legalMissing = allBusinesses.filter((b: Business) => ['missing', 'warning'].includes(getLegalState(b))).length;
       const auditedVisibility = allBusinesses.filter((b: Business) => !!b.visibility_audited_at || !!b.legal_presence_audited_at).length;
+      const needsAudit = allBusinesses.filter((b: Business) => needsQuickAudit(b)).length;
       const googleMissing = allBusinesses.filter((b: Business) => getGoogleState(b) === 'missing').length;
       const offerPackVisibility = allBusinesses.filter((b: Business) => b.recommended_offer_code === 'pack_visibility').length;
       const offerGoogleBusiness = allBusinesses.filter((b: Business) => b.recommended_offer_code === 'google_business').length;
@@ -1359,6 +1364,7 @@ export default function ResultsScreen() {
             legal_confirmed: legalConfirmed,
             legal_missing: legalMissing,
             audited_visibility: auditedVisibility,
+            needs_audit: needsAudit,
             google_missing: googleMissing,
             offer_pack_visibility: offerPackVisibility,
             offer_google_business: offerGoogleBusiness,
@@ -1749,6 +1755,11 @@ export default function ResultsScreen() {
 
     return getGoogleState(item) === 'unknown' || getPJState(item) === 'unknown';
   };
+
+  const shortlistNeedsAuditCount = useMemo(
+    () => shortlistScopeBusinesses.filter((business) => needsQuickAudit(business)).length,
+    [shortlistScopeBusinesses]
+  );
 
   const getCreationBadge = (dateCreation?: string) => {
     if (!dateCreation) {
@@ -2203,6 +2214,7 @@ export default function ResultsScreen() {
         legalConfirmed={stats?.legal_confirmed || 0}
         legalMissing={stats?.legal_missing || 0}
         auditedVisibility={stats?.audited_visibility || 0}
+        needsAudit={stats?.needs_audit || 0}
         offerPackVisibility={stats?.offer_pack_visibility || 0}
         offerGoogleBusiness={stats?.offer_google_business || 0}
         offerWebsite={stats?.offer_website || 0}
@@ -2342,6 +2354,21 @@ export default function ResultsScreen() {
               <Text style={styles.shortlistActionLabel}>A visiter</Text>
               <Text style={styles.shortlistActionCount}>{shortlistReadinessCounts.field}</Text>
             </TouchableOpacity>
+
+            {shortlistNeedsAuditCount > 0 ? (
+              <TouchableOpacity
+                style={[styles.shortlistAction, styles.shortlistActionAudit]}
+                onPress={() => {
+                  setViewMode('verified');
+                  setActiveFilter('needs_audit');
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="shield-checkmark-outline" size={16} color="#0F766E" />
+                <Text style={styles.shortlistActionLabel}>A auditer</Text>
+                <Text style={styles.shortlistActionCount}>{shortlistNeedsAuditCount}</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {dailyQueueState ? (
@@ -3615,6 +3642,10 @@ const styles = StyleSheet.create({
   shortlistActionField: {
     backgroundColor: '#F5F3FF',
     borderColor: '#DDD6FE',
+  },
+  shortlistActionAudit: {
+    backgroundColor: '#ECFEFF',
+    borderColor: '#A5F3FC',
   },
   shortlistActionLabel: {
     fontSize: 13,
