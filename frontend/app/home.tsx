@@ -154,6 +154,7 @@ export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const isCompactScreen = width < 1100;
   const [userName, setUserName] = useState('');
+  const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null);
   const [showApiOnboarding, setShowApiOnboarding] = useState(false);
   const [apiKeysStatus, setApiKeysStatus] = useState({
     hasGoogleKey: false,
@@ -238,8 +239,19 @@ export default function HomeScreen() {
       redirectToLogin(router);
       return;
     }
-    const name = await AsyncStorage.getItem('userName');
-    setUserName(name || 'Utilisateur');
+    const [name, storedUser] = await AsyncStorage.multiGet(['userName', 'user']);
+    const nameValue = name?.[1];
+    const storedUserValue = storedUser?.[1];
+    if (storedUserValue) {
+      try {
+        const parsedUser = JSON.parse(storedUserValue);
+        const nextRole = parsedUser?.role === 'admin' ? 'admin' : 'user';
+        setUserRole(nextRole);
+      } catch (error) {
+        console.error('Error parsing stored user:', error);
+      }
+    }
+    setUserName(nameValue || 'Utilisateur');
 
     try {
       const keysResponse = await axios.get(`${API_URL}/api/user/api-keys`, {
@@ -475,6 +487,16 @@ export default function HomeScreen() {
               </View>
             )}
           </TouchableOpacity>
+
+          {userRole === 'admin' ? (
+            <TouchableOpacity
+              onPress={() => router.push('/admin')}
+              style={styles.adminHeaderButton}
+            >
+              <Ionicons name="shield-checkmark" size={18} color="#4F46E5" />
+              <Text style={styles.adminHeaderButtonText}>Admin</Text>
+            </TouchableOpacity>
+          ) : null}
           
           <TouchableOpacity onPress={() => router.push('/settings')} style={styles.headerIcon}>
             <Ionicons name="settings-outline" size={22} color="#666" />
@@ -1229,6 +1251,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  adminHeaderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  adminHeaderButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4F46E5',
   },
   welcomeText: {
     fontSize: 14,
