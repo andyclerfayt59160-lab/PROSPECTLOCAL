@@ -15,6 +15,7 @@ const TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/scan-internet': 'Scan Tout Internet',
   '/scan-pappers': 'Scan Pappers+',
+  '/audit-site-externe': 'Audit site externe',
   '/newscan': 'Nouveau scan web',
   '/pappersscan': 'Nouveau scan Pappers+',
   '/webscan': 'Nouveau scan internet',

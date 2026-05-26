@@ -32,6 +32,7 @@ export default function RootLayout() {
                 <Stack.Screen name="dashboard" />
                 <Stack.Screen name="scan-internet" />
                 <Stack.Screen name="scan-pappers" />
+                <Stack.Screen name="audit-site-externe" />
                 <Stack.Screen name="newscan" options={{ animation: 'slide_from_bottom' }} />
                 <Stack.Screen name="pappersscan" options={{ animation: 'slide_from_bottom' }} />
                 <Stack.Screen name="webscan" options={{ animation: 'slide_from_bottom' }} />

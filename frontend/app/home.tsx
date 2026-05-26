@@ -963,6 +963,37 @@ export default function HomeScreen() {
               <Ionicons name="arrow-forward" size={20} color="#FFF" />
             </View>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.mainCard, styles.cardExternalAudit, isCompactScreen && styles.mainCardCompact]}
+            onPress={() => router.push('/audit-site-externe')}
+            activeOpacity={0.9}
+          >
+            <View style={styles.cardIconContainer}>
+              <Ionicons name="globe-outline" size={48} color="#FFF" />
+            </View>
+            <Text style={styles.cardTitle}>AUDIT SITE EXTERNE</Text>
+            <Text style={styles.cardDescription}>
+              Isole les pros equipes d un site concurrent a Solocal sur une zone definie, avec export Excel complet.
+            </Text>
+            <View style={styles.cardFeatures}>
+              <View style={styles.featureItem}>
+                <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                <Text style={styles.featureText}>Prestataire detecte</Text>
+              </View>
+              <View style={styles.featureItem}>
+                <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                <Text style={styles.featureText}>Rayon kilometrique</Text>
+              </View>
+              <View style={styles.featureItem}>
+                <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                <Text style={styles.featureText}>Export Excel integral</Text>
+              </View>
+            </View>
+            <View style={styles.cardAction}>
+              <Text style={styles.cardActionText}>Acceder</Text>
+              <Ionicons name="arrow-forward" size={20} color="#FFF" />
+            </View>
+          </TouchableOpacity>
         </View>
 
         {/* Quick Stats */}
@@ -1354,6 +1385,7 @@ const styles = StyleSheet.create({
   },
   cardsContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 16,
     marginBottom: 32,
   },
@@ -1374,6 +1406,9 @@ const styles = StyleSheet.create({
   },
   cardPappers: {
     backgroundColor: '#F97316',
+  },
+  cardExternalAudit: {
+    backgroundColor: '#0F766E',
   },
   cardIconContainer: {
     width: 80,

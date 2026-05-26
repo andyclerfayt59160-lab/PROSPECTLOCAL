@@ -21,6 +21,8 @@ import asyncio
 import uuid
 import unicodedata
 from bs4 import BeautifulSoup
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
 from urllib.parse import urlparse, urljoin
 
 # Import models and auth
@@ -128,6 +130,7 @@ from services.web_scraper import (
     search_web_for_businesses_with_metadata,
     build_web_domain_activity_payload,
     get_web_scan_source_query_count,
+    WEB_SCAN_DOMAIN_LABELS,
 )
 from services.sirene import (
     get_sirene_data,
@@ -147,6 +150,7 @@ from services.google_places import (
     check_website,
     search_businesses_hybrid
 )
+from services.website_provider import detect_website_provider
 from services.lead_scoring import build_solocal_priority_metadata as service_build_solocal_priority_metadata
 from services.deduplication import (
     build_identity_key,
@@ -5947,6 +5951,682 @@ class WebScanEstimateRequest(PydanticBaseModel):
     include_facebook: bool = True
     include_linkedin: bool = True
     include_websites: bool = True
+
+
+class ExternalSiteAuditRequest(PydanticBaseModel):
+    location: str
+    radius_km: int = 20
+    selected_domains: List[str] = []
+
+
+def _extract_city_and_postal_from_address(address: str, fallback_city: str) -> tuple[str, str]:
+    raw_address = (address or "").strip()
+    postal_code = ""
+    city = (fallback_city or "").strip()
+
+    postal_match = re.search(r"\b(\d{5})\b", raw_address)
+    if postal_match:
+        postal_code = postal_match.group(1)
+        remaining = raw_address[postal_match.end():].strip(" ,")
+        if remaining:
+            city = remaining.split(",")[0].strip() or city
+    elif raw_address:
+        parts = [part.strip() for part in raw_address.split(",") if part.strip()]
+        if len(parts) >= 2:
+            city = parts[-2] if len(parts) > 2 else parts[-1]
+
+    return city, postal_code
+
+
+async def _build_external_site_audit_plan(request: ExternalSiteAuditRequest) -> Dict[str, Any]:
+    selected_domains = list(dict.fromkeys(request.selected_domains or list(WEB_SCAN_DOMAIN_LABELS.keys())))
+    catalog = await _load_web_scan_catalog()
+    payload = build_web_domain_activity_payload(
+        activities=catalog,
+        selected_domains=selected_domains,
+        domain_mode="exhaustive",
+    )
+    activity_labels = [label.strip() for label in payload["selected_activity_labels"] if label.strip()]
+    if not activity_labels:
+        raise HTTPException(
+            status_code=400,
+            detail="Impossible de relier les domaines choisis a des activites du catalogue.",
+        )
+
+    return {
+        "query_label": payload["query_label"],
+        "resolved_families": payload["resolved_families"],
+        "activity_labels": activity_labels,
+        "activities_available": payload["available_activity_count"],
+        "activities_selected": payload["selected_activity_count"],
+        "selected_domains": selected_domains,
+        "selected_domain_labels": [
+            WEB_SCAN_DOMAIN_LABELS.get(domain_id, domain_id.title())
+            for domain_id in selected_domains
+        ],
+    }
+
+
+async def _build_external_site_audit_centers(
+    location: str,
+    radius_km: int,
+    google_api_key: str,
+) -> List[Dict[str, Any]]:
+    lat, lng = await geocode_location(location, google_api_key)
+    if radius_km <= 50:
+        return [
+            {
+                "label": location,
+                "lat": lat,
+                "lng": lng,
+                "distance_km": 0,
+                "search_radius_km": radius_km,
+            }
+        ]
+
+    nearby_cities = await geo_get_cities_in_radius(lat, lng, radius_km, min_population=0)
+    if not nearby_cities:
+        return [
+            {
+                "label": location,
+                "lat": lat,
+                "lng": lng,
+                "distance_km": 0,
+                "search_radius_km": 50,
+            }
+        ]
+
+    return [
+        {
+            "label": city.get("nom") or location,
+            "lat": city.get("lat"),
+            "lng": city.get("lng"),
+            "distance_km": city.get("distance_km", 0),
+            "search_radius_km": min(20, radius_km),
+        }
+        for city in nearby_cities
+        if city.get("lat") is not None and city.get("lng") is not None
+    ]
+
+
+async def _update_external_site_audit_progress(
+    audit_id: str,
+    *,
+    progress: int,
+    message: str,
+    step: int,
+    total_steps: int,
+    extra_fields: Optional[Dict[str, Any]] = None,
+) -> None:
+    update_fields: Dict[str, Any] = {
+        "progress": max(0, min(progress, 100)),
+        "progress_message": message,
+        "progress_step": step,
+        "progress_total_steps": total_steps,
+        "last_progress_at": datetime.utcnow(),
+    }
+    if extra_fields:
+        update_fields.update(extra_fields)
+    await db.external_site_audits.update_one({"id": audit_id}, {"$set": update_fields})
+
+
+async def run_external_site_audit(
+    *,
+    audit_id: str,
+    user_id: str,
+    user_email: str,
+    request: ExternalSiteAuditRequest,
+) -> None:
+    user_keys = await fetch_user_api_keys(user_id)
+    google_api_key = user_keys.get("google_api_key")
+    serper_api_key = user_keys.get("serper_api_key")
+
+    try:
+        if not google_api_key:
+            raise RuntimeError(
+                "Une cle Google personnelle est requise pour lancer un audit site externe."
+            )
+
+        plan = await _build_external_site_audit_plan(request)
+        centers = await _build_external_site_audit_centers(
+            location=request.location,
+            radius_km=request.radius_km,
+            google_api_key=google_api_key,
+        )
+
+        search_steps = max(1, len(plan["activity_labels"]) * len(centers))
+        await _update_external_site_audit_progress(
+            audit_id,
+            progress=1,
+            message="Preparation de l'audit site externe...",
+            step=0,
+            total_steps=search_steps,
+            extra_fields={
+                "status": "processing",
+                "started_at": datetime.utcnow(),
+                "search_centers_count": len(centers),
+                "selected_activity_labels": plan["activity_labels"],
+                "query_label": plan["query_label"],
+                "resolved_families": plan["resolved_families"],
+                "selected_domains": plan["selected_domains"],
+                "selected_domain_labels": plan["selected_domain_labels"],
+            },
+        )
+
+        candidates_by_key: Dict[str, Dict[str, Any]] = {}
+        total_places_seen = 0
+        fallback_uses = 0
+        current_step = 0
+        await db.external_site_audit_results.delete_many({"audit_id": audit_id})
+
+        for center in centers:
+            for activity_label in plan["activity_labels"]:
+                current_step += 1
+                await _update_external_site_audit_progress(
+                    audit_id,
+                    progress=int((current_step / search_steps) * 60),
+                    message=f"Recherche de {activity_label} autour de {center['label']}...",
+                    step=current_step,
+                    total_steps=search_steps,
+                )
+
+                places, source_used = await search_businesses_hybrid(
+                    query=activity_label,
+                    location=center["label"],
+                    lat=center["lat"],
+                    lng=center["lng"],
+                    radius_km=center["search_radius_km"],
+                    google_api_key=google_api_key,
+                    serper_api_key=serper_api_key,
+                    max_results=60,
+                )
+                if source_used == "serper_fallback":
+                    fallback_uses += 1
+
+                total_places_seen += len(places)
+                for place in places:
+                    website_url = place.get("website")
+                    if not is_probable_business_website(website_url):
+                        continue
+
+                    place_id = place.get("place_id")
+                    fallback_key = normalize_name_for_matching(
+                        f"{place.get('name', '')}|{place.get('formatted_address', '')}"
+                    )
+                    dedupe_key = place_id or fallback_key
+                    if not dedupe_key:
+                        continue
+
+                    coords = (place.get("geometry") or {}).get("location") or {}
+                    place_lat = coords.get("lat")
+                    place_lng = coords.get("lng")
+                    city_name, postal_code = _extract_city_and_postal_from_address(
+                        place.get("formatted_address", ""),
+                        center["label"],
+                    )
+                    distance_km = None
+                    if place_lat is not None and place_lng is not None:
+                        distance_km = round(
+                            haversine_distance(center["lat"], center["lng"], place_lat, place_lng),
+                            1,
+                        )
+
+                    existing = candidates_by_key.get(dedupe_key)
+                    if existing:
+                        existing["matched_activities"].add(activity_label)
+                        existing["search_locations"].add(center["label"])
+                        if source_used:
+                            existing["search_sources"].add(source_used)
+                        continue
+
+                    candidates_by_key[dedupe_key] = {
+                        "place_id": place_id,
+                        "name": place.get("name", "").strip(),
+                        "address": place.get("formatted_address", ""),
+                        "city": city_name,
+                        "postal_code": postal_code,
+                        "phone": place.get("formatted_phone_number"),
+                        "email": None,
+                        "website_url": website_url,
+                        "google_rating": place.get("rating"),
+                        "google_reviews_count": place.get("user_ratings_total", 0),
+                        "latitude": place_lat,
+                        "longitude": place_lng,
+                        "distance_km": distance_km,
+                        "matched_activities": {activity_label},
+                        "search_locations": {center["label"]},
+                        "search_sources": {source_used} if source_used else set(),
+                    }
+
+        candidates = list(candidates_by_key.values())
+        provider_steps = max(1, len(candidates))
+        total_steps = search_steps + provider_steps
+        await _update_external_site_audit_progress(
+            audit_id,
+            progress=62,
+            message=f"Audit des prestataires sur {len(candidates)} sites detectes...",
+            step=search_steps,
+            total_steps=total_steps,
+            extra_fields={
+                "candidate_sites_count": len(candidates),
+                "total_places_seen": total_places_seen,
+            },
+        )
+
+        results: List[Dict[str, Any]] = []
+        solocal_count = 0
+        unreachable_count = 0
+
+        for provider_index, candidate in enumerate(candidates, start=1):
+            provider = await detect_website_provider(candidate["website_url"])
+            status = provider.get("status")
+            if status == "solocal":
+                solocal_count += 1
+                continue
+            if status in {"missing", "directory", "unreachable"}:
+                unreachable_count += 1
+                continue
+
+            phone_value = candidate.get("phone")
+            email_value = candidate.get("email")
+            if not phone_value or not email_value:
+                try:
+                    website_contacts = await scrape_website_contacts(candidate["website_url"])
+                except Exception:
+                    website_contacts = {"success": False, "phones": [], "emails": []}
+
+                if website_contacts.get("success"):
+                    if not phone_value and website_contacts.get("phones"):
+                        phone_value = website_contacts["phones"][0]
+                    if not email_value and website_contacts.get("emails"):
+                        email_value = website_contacts["emails"][0]
+
+            results.append(
+                {
+                    "audit_id": audit_id,
+                    "user_id": user_id,
+                    "name": candidate["name"],
+                    "address": candidate["address"],
+                    "city": candidate["city"],
+                    "postal_code": candidate["postal_code"],
+                    "phone": phone_value,
+                    "email": email_value,
+                    "website_url": provider.get("final_url") or candidate["website_url"],
+                    "website_host": provider.get("website_host"),
+                    "provider_status": provider.get("status"),
+                    "provider_name": provider.get("provider_name") or "Prestataire externe",
+                    "provider_confidence": provider.get("provider_confidence"),
+                    "provider_reason": provider.get("provider_reason"),
+                    "domain_registered_at": provider.get("domain_registered_at"),
+                    "site_age_days": provider.get("site_age_days"),
+                    "site_age_label": provider.get("site_age_label"),
+                    "google_rating": candidate.get("google_rating"),
+                    "google_reviews_count": candidate.get("google_reviews_count"),
+                    "distance_km": candidate.get("distance_km"),
+                    "matched_activities": sorted(candidate["matched_activities"]),
+                    "search_locations": sorted(candidate["search_locations"]),
+                    "search_sources": sorted(candidate["search_sources"]),
+                    "sort_city": (candidate["city"] or "").strip().lower(),
+                    "sort_name": (candidate["name"] or "").strip().lower(),
+                    "created_at": datetime.utcnow(),
+                }
+            )
+
+            if provider_index == 1 or provider_index == provider_steps or provider_index % 5 == 0:
+                await _update_external_site_audit_progress(
+                    audit_id,
+                    progress=62 + int((provider_index / provider_steps) * 38),
+                    message=f"Qualification des sites concurrents {provider_index}/{provider_steps}...",
+                    step=search_steps + provider_index,
+                    total_steps=total_steps,
+                )
+
+        results.sort(
+            key=lambda item: (
+                item.get("sort_city") or "",
+                item.get("sort_name") or "",
+            )
+        )
+
+        if results:
+            batch_size = 250
+            for start_index in range(0, len(results), batch_size):
+                batch = results[start_index:start_index + batch_size]
+                await db.external_site_audit_results.insert_many(batch, ordered=False)
+
+        summary = {
+            "search_centers_count": len(centers),
+            "activities_scanned": len(plan["activity_labels"]),
+            "places_seen": total_places_seen,
+            "candidate_sites": len(candidates),
+            "solocal_sites_excluded": solocal_count,
+            "unreachable_sites_skipped": unreachable_count,
+            "external_sites_found": len(results),
+            "serper_fallback_queries": fallback_uses,
+        }
+
+        await db.external_site_audits.update_one(
+            {"id": audit_id},
+            {
+                "$set": {
+                    "status": "done",
+                    "completed_at": datetime.utcnow(),
+                    "progress": 100,
+                    "progress_message": f"Audit termine - {len(results)} sites externes trouves",
+                    "progress_step": total_steps,
+                    "progress_total_steps": total_steps,
+                    "last_progress_at": datetime.utcnow(),
+                    "result_count": len(results),
+                    "summary": summary,
+                    "preview_results": [
+                        {
+                            "name": item.get("name"),
+                            "city": item.get("city"),
+                            "website_url": item.get("website_url"),
+                            "provider_name": item.get("provider_name"),
+                            "phone": item.get("phone"),
+                            "site_age_label": item.get("site_age_label"),
+                        }
+                        for item in results[:5]
+                    ],
+                }
+            },
+        )
+    except Exception as exc:
+        logger.exception("External site audit failed: %s", exc)
+        await db.external_site_audits.update_one(
+            {"id": audit_id},
+            {
+                "$set": {
+                    "status": "failed",
+                    "failed_at": datetime.utcnow(),
+                    "progress_message": str(exc),
+                    "error": str(exc),
+                    "last_progress_at": datetime.utcnow(),
+                }
+            },
+        )
+
+
+def _serialize_external_site_result_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    sanitized = dict(row)
+    sanitized.pop("_id", None)
+    sanitized.pop("audit_id", None)
+    sanitized.pop("user_id", None)
+    sanitized.pop("sort_city", None)
+    sanitized.pop("sort_name", None)
+    return sanitized
+
+
+def _build_external_site_export_workbook(
+    *,
+    audit: Dict[str, Any],
+    results: List[Dict[str, Any]],
+) -> io.BytesIO:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Sites externes"
+
+    headers = [
+        "Entreprise",
+        "Activites",
+        "Adresse",
+        "Code postal",
+        "Ville",
+        "Telephone",
+        "Email",
+        "Site web",
+        "Domaine",
+        "Prestataire",
+        "Confiance",
+        "Raison",
+        "Age du site",
+        "Date creation domaine",
+        "Note Google",
+        "Avis Google",
+        "Distance (km)",
+        "Centres recherches",
+        "Sources",
+    ]
+    worksheet.append(headers)
+
+    header_fill = PatternFill(fill_type="solid", fgColor="4F46E5")
+    header_font = Font(color="FFFFFF", bold=True)
+    for cell in worksheet[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+
+    for row in results:
+        worksheet.append(
+            [
+                row.get("name", ""),
+                ", ".join(row.get("matched_activities") or []),
+                row.get("address", ""),
+                row.get("postal_code", ""),
+                row.get("city", ""),
+                row.get("phone", ""),
+                row.get("email", ""),
+                row.get("website_url", ""),
+                row.get("website_host", ""),
+                row.get("provider_name", ""),
+                row.get("provider_confidence", ""),
+                row.get("provider_reason", ""),
+                row.get("site_age_label", ""),
+                row.get("domain_registered_at", ""),
+                row.get("google_rating", ""),
+                row.get("google_reviews_count", ""),
+                row.get("distance_km", ""),
+                ", ".join(row.get("search_locations") or []),
+                ", ".join(row.get("search_sources") or []),
+            ]
+        )
+
+    worksheet.freeze_panes = "A2"
+    worksheet.auto_filter.ref = worksheet.dimensions
+
+    preferred_widths = {
+        "A": 30,
+        "B": 34,
+        "C": 42,
+        "D": 12,
+        "E": 20,
+        "F": 18,
+        "G": 28,
+        "H": 40,
+        "I": 24,
+        "J": 24,
+        "K": 12,
+        "L": 36,
+        "M": 14,
+        "N": 24,
+        "O": 12,
+        "P": 12,
+        "Q": 14,
+        "R": 24,
+        "S": 20,
+    }
+    for column_letter, width in preferred_widths.items():
+        worksheet.column_dimensions[column_letter].width = width
+
+    metadata_sheet = workbook.create_sheet("Resume")
+    metadata_sheet.append(["Audit site externe", audit.get("query_label") or "Audit site externe"])
+    metadata_sheet.append(["Lieu", audit.get("location") or ""])
+    metadata_sheet.append(["Rayon (km)", audit.get("radius_km") or 0])
+    metadata_sheet.append(["Domaines", ", ".join(audit.get("selected_domain_labels") or [])])
+    metadata_sheet.append(["Resultats", audit.get("result_count") or 0])
+    metadata_sheet.append(["Cree le", str(audit.get("created_at") or "")])
+    metadata_sheet.append(["Termine le", str(audit.get("completed_at") or "")])
+
+    summary = audit.get("summary") or {}
+    for key, value in summary.items():
+        metadata_sheet.append([key, value])
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+@api_router.post("/external-site-audits")
+async def create_external_site_audit(
+    request: ExternalSiteAuditRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user),
+):
+    user_id = current_user["sub"]
+    user_email = current_user.get("email") or ""
+
+    radius_km = max(1, min(int(request.radius_km or 20), 300))
+    selected_domains = list(
+        dict.fromkeys(
+            domain_id.strip().lower()
+            for domain_id in (request.selected_domains or [])
+            if isinstance(domain_id, str) and domain_id.strip()
+        )
+    )
+
+    user_keys = await fetch_user_api_keys(user_id)
+    if not user_keys.get("google_api_key"):
+        raise HTTPException(
+            status_code=400,
+            detail="Une cle Google personnelle est requise pour utiliser l'audit site externe.",
+        )
+
+    normalized_request = ExternalSiteAuditRequest(
+        location=request.location.strip(),
+        radius_km=radius_km,
+        selected_domains=selected_domains,
+    )
+    plan = await _build_external_site_audit_plan(normalized_request)
+
+    audit_id = str(uuid.uuid4())
+    created_at = datetime.utcnow()
+    audit_doc = {
+        "id": audit_id,
+        "user_id": user_id,
+        "user_email": user_email,
+        "status": "queued",
+        "created_at": created_at,
+        "progress": 0,
+        "progress_message": "Audit en file d'attente...",
+        "progress_step": 0,
+        "progress_total_steps": 0,
+        "location": normalized_request.location,
+        "radius_km": radius_km,
+        "selected_domains": plan["selected_domains"],
+        "selected_domain_labels": plan["selected_domain_labels"],
+        "selected_activity_labels": plan["activity_labels"],
+        "query_label": plan["query_label"],
+        "resolved_families": plan["resolved_families"],
+        "activities_available": plan["activities_available"],
+        "activities_selected": plan["activities_selected"],
+        "result_count": 0,
+        "summary": {},
+        "preview_results": [],
+    }
+    await db.external_site_audits.insert_one(audit_doc)
+
+    background_tasks.add_task(
+        run_external_site_audit,
+        audit_id=audit_id,
+        user_id=user_id,
+        user_email=user_email,
+        request=normalized_request,
+    )
+
+    return {
+        "success": True,
+        "audit_id": audit_id,
+        "message": "Audit site externe lance.",
+    }
+
+
+@api_router.get("/external-site-audits")
+async def list_external_site_audits(
+    limit: int = Query(10, ge=1, le=30),
+    current_user: dict = Depends(get_current_user),
+):
+    cursor = (
+        db.external_site_audits
+        .find({"user_id": current_user["sub"]}, {"_id": 0})
+        .sort("created_at", -1)
+        .limit(limit)
+    )
+    return await cursor.to_list(length=limit)
+
+
+@api_router.get("/external-site-audits/{audit_id}")
+async def get_external_site_audit(
+    audit_id: str,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=500),
+    current_user: dict = Depends(get_current_user),
+):
+    audit = await db.external_site_audits.find_one(
+        {"id": audit_id, "user_id": current_user["sub"]},
+        {"_id": 0},
+    )
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit site externe introuvable.")
+
+    result_count = int(audit.get("result_count") or 0)
+    results: List[Dict[str, Any]] = []
+    if result_count > 0:
+        cursor = (
+            db.external_site_audit_results
+            .find({"audit_id": audit_id})
+            .sort([("sort_city", 1), ("sort_name", 1)])
+            .skip(offset)
+            .limit(limit)
+        )
+        rows = await cursor.to_list(length=limit)
+        results = [_serialize_external_site_result_row(row) for row in rows]
+
+    return {
+        **audit,
+        "results": results,
+        "results_offset": offset,
+        "results_limit": limit,
+        "has_more_results": offset + len(results) < result_count,
+    }
+
+
+@api_router.get("/external-site-audits/{audit_id}/export/xlsx")
+async def export_external_site_audit_xlsx(
+    audit_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    audit = await db.external_site_audits.find_one(
+        {"id": audit_id, "user_id": current_user["sub"]},
+        {"_id": 0},
+    )
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit site externe introuvable.")
+
+    if audit.get("status") != "done":
+        raise HTTPException(
+            status_code=409,
+            detail="L'export Excel est disponible une fois l'audit termine.",
+        )
+
+    cursor = (
+        db.external_site_audit_results
+        .find({"audit_id": audit_id})
+        .sort([("sort_city", 1), ("sort_name", 1)])
+    )
+    results: List[Dict[str, Any]] = []
+    async for row in cursor:
+        results.append(_serialize_external_site_result_row(row))
+    workbook_buffer = _build_external_site_export_workbook(audit=audit, results=results)
+
+    safe_location = re.sub(r"[^A-Za-z0-9_-]+", "_", (audit.get("location") or "secteur"))[:40].strip("_") or "secteur"
+    filename = f"audit_site_externe_{safe_location}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+
+    return StreamingResponse(
+        workbook_buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @api_router.post("/web-scan/estimate")
