@@ -1470,8 +1470,16 @@ export default function ResultsScreen() {
       );
       
       patchBusinessInLists(item.id, { contact_status_manual: newStatus });
+      await loadBusinesses();
+      showToast(
+        newStatus === 'contacted'
+          ? `${item.name} marque comme deja contacte.`
+          : `${item.name} repasse en non contacte.`,
+        'success'
+      );
     } catch (error) {
       console.error('Error updating contact status:', error);
+      showToast("Impossible de mettre a jour le statut d'appel.", 'error');
     }
   };
 
@@ -1501,8 +1509,11 @@ export default function ResultsScreen() {
                 } else {
                   patchBusinessInLists(item.id, { client_status: newStatus });
                 }
+                await loadBusinesses();
+                showToast(`${item.name} passe client.`, 'success');
               } catch (error) {
                 console.error('Error updating client status:', error);
+                showToast("Impossible de mettre a jour le statut client.", 'error');
               }
             }
           }
@@ -1517,8 +1528,11 @@ export default function ResultsScreen() {
         );
         
         patchBusinessInLists(item.id, { client_status: newStatus });
+        await loadBusinesses();
+        showToast(`${item.name} sort des clients.`, 'success');
       } catch (error) {
         console.error('Error updating client status:', error);
+        showToast("Impossible de mettre a jour le statut client.", 'error');
       }
     }
   };
@@ -1572,6 +1586,28 @@ export default function ResultsScreen() {
     } catch (error) {
       console.error('Error moving business to terrain:', error);
       showToast("Impossible d'envoyer ce lead en terrain.", 'error');
+    }
+  };
+
+  const handleToggleNotInterested = async (item: Business) => {
+    const newStatus = item.interest_status === 'not_interested' ? 'unknown' : 'not_interested';
+
+    try {
+      await axios.patch(
+        `${API_URL}/api/businesses/${item.id}/status`,
+        { interest_status: newStatus },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      await loadBusinesses();
+      showToast(
+        newStatus === 'not_interested'
+          ? `${item.name} est sorti de la file du jour.`
+          : `${item.name} redevient exploitable dans la file.`,
+        'success'
+      );
+    } catch (error) {
+      console.error('Error updating interest status:', error);
+      showToast("Impossible de mettre a jour l'interet commercial.", 'error');
     }
   };
 
@@ -1711,6 +1747,7 @@ export default function ResultsScreen() {
       const recommendedOffer = item.recommended_offer_code ? OFFER_META[item.recommended_offer_code] : null;
       const salesReadiness = item.sales_readiness_status ? SALES_READINESS_META[item.sales_readiness_status] : null;
       const crmTracked = item.crm_status === 'in_crm';
+      const notInterested = item.interest_status === 'not_interested';
       const canSendToTerrain = viewMode !== 'visite_terrain' && item.sales_readiness_status !== 'field';
     
     return (
@@ -1884,6 +1921,27 @@ export default function ResultsScreen() {
                 />
                 <Text style={[styles.quickActionButtonCrmText, crmTracked && styles.quickActionButtonCrmTextActive]}>
                   {crmTracked ? 'Dans CRM' : 'Mettre CRM'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.quickActionButton,
+                  notInterested ? styles.quickActionButtonSkipActive : styles.quickActionButtonSkip,
+                ]}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  handleToggleNotInterested(item);
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name={notInterested ? 'remove-circle' : 'remove-circle-outline'}
+                  size={13}
+                  color={notInterested ? '#FFFFFF' : '#B91C1C'}
+                />
+                <Text style={[styles.quickActionButtonSkipText, notInterested && styles.quickActionButtonSkipTextActive]}>
+                  {notInterested ? 'Ecarte' : 'Ecarter'}
                 </Text>
               </TouchableOpacity>
 
@@ -3072,6 +3130,22 @@ const styles = StyleSheet.create({
     color: '#1D4ED8',
   },
   quickActionButtonCrmTextActive: {
+    color: '#FFFFFF',
+  },
+  quickActionButtonSkip: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  quickActionButtonSkipActive: {
+    backgroundColor: '#DC2626',
+    borderColor: '#DC2626',
+  },
+  quickActionButtonSkipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#B91C1C',
+  },
+  quickActionButtonSkipTextActive: {
     color: '#FFFFFF',
   },
   quickActionButtonField: {
