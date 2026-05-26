@@ -48,6 +48,11 @@ WEB_SCAN_DOMAIN_FAMILY_KEYS = {
 }
 
 
+def _parse_html_document(html: str) -> BeautifulSoup:
+    """Use the built-in parser to avoid lxml dependency in production."""
+    return BeautifulSoup(html or "", "html.parser")
+
+
 def _normalize_family_key(family: str) -> str:
     return (
         unicodedata.normalize("NFD", family or "")
@@ -225,7 +230,7 @@ async def scrape_website_contacts(website_url: str) -> dict:
                 
                 if response.status_code == 200:
                     html = response.text
-                    soup = BeautifulSoup(html, 'lxml')
+                    soup = _parse_html_document(html)
                     
                     # Supprimer scripts et styles
                     for tag in soup(['script', 'style', 'noscript']):

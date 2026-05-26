@@ -35,6 +35,11 @@ PROVIDER_SIGNATURES = [
 ]
 
 
+def _parse_html_document(html: str) -> BeautifulSoup:
+    """Use the stdlib parser so hosted deployments do not depend on lxml."""
+    return BeautifulSoup(html or "", "html.parser")
+
+
 def _normalize_website_url(url: str) -> str:
     candidate = (url or "").strip()
     if not candidate:
@@ -120,7 +125,7 @@ async def detect_website_provider(url: str) -> Dict[str, Any]:
 
     final_url = str(response.url)
     html = response.text or ""
-    soup = BeautifulSoup(html, "lxml")
+    soup = _parse_html_document(html)
     generator = _extract_generator_signature(soup)
     visible_text = soup.get_text(" ", strip=True)[:50000]
     combined = " ".join([final_url, html[:250000], generator, visible_text]).lower()

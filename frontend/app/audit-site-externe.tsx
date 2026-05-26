@@ -210,6 +210,20 @@ export default function AuditSiteExterneScreen() {
       const nextAudits = Array.isArray(response.data) ? response.data : [];
       setAudits(nextAudits);
 
+      if (selectedAuditId) {
+        const refreshedSelectedAudit = nextAudits.find((audit) => audit.id === selectedAuditId);
+        if (refreshedSelectedAudit && selectedAudit) {
+          setSelectedAudit((current) =>
+            current
+              ? {
+                  ...current,
+                  ...refreshedSelectedAudit,
+                }
+              : current
+          );
+        }
+      }
+
       if (!selectedAuditId && nextAudits.length > 0) {
         const firstAuditId = nextAudits[0]?.id;
         if (firstAuditId) {
@@ -688,7 +702,27 @@ export default function AuditSiteExterneScreen() {
             </View>
           </View>
 
-          {selectedAudit.status !== 'done' ? (
+          {selectedAudit.status === 'failed' ? (
+            <View style={[styles.progressCard, styles.failedCard]}>
+              <View style={styles.progressHeader}>
+                <Text style={styles.failedTitle}>Audit interrompu</Text>
+                <Text style={styles.failedTitle}>Echec</Text>
+              </View>
+              <Text style={styles.failedMessage}>
+                {selectedAudit.progress_message || "L'audit s'est interrompu avant la fin."}
+              </Text>
+              <TouchableOpacity style={styles.retryButton} onPress={handleStartAudit} disabled={loadingStart}>
+                {loadingStart ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="refresh-outline" size={16} color="#FFFFFF" />
+                    <Text style={styles.retryButtonText}>Relancer cet audit</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : selectedAudit.status !== 'done' ? (
             <View style={styles.progressCard}>
               <View style={styles.progressHeader}>
                 <Text style={styles.progressTitle}>Audit en cours</Text>
@@ -1076,6 +1110,36 @@ const styles = StyleSheet.create({
   progressLoader: {
     paddingTop: 6,
     alignItems: 'flex-start',
+  },
+  failedCard: {
+    borderColor: '#FECACA',
+    backgroundColor: '#FEF2F2',
+  },
+  failedTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#B91C1C',
+  },
+  failedMessage: {
+    fontSize: 13,
+    color: '#7F1D1D',
+    lineHeight: 19,
+  },
+  retryButton: {
+    marginTop: 4,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#B91C1C',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 13,
   },
   readyText: {
     fontSize: 13,
