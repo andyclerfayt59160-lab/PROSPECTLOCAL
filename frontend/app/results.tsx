@@ -542,6 +542,7 @@ export default function ResultsScreen() {
   const [auditingTopLeads, setAuditingTopLeads] = useState(false);
   const [batchAuditSummary, setBatchAuditSummary] = useState('');
   const [hideAvoidLeads, setHideAvoidLeads] = useState(true);
+  const [onlyNewLeads, setOnlyNewLeads] = useState(true);
   const [groupByLocality, setGroupByLocality] = useState(false);
   const [selectedLocality, setSelectedLocality] = useState<string>('all');
   const autoSelectedViewScanRef = React.useRef<string | null>(null);
@@ -560,6 +561,18 @@ export default function ResultsScreen() {
   const webActionableCount = useMemo(
     () => businesses.length + unverifiedBusinesses.length,
     [businesses.length, unverifiedBusinesses.length]
+  );
+
+  const webNewLeadCount = useMemo(
+    () =>
+      [...businesses, ...unverifiedBusinesses, ...visiteTerrainBusinesses].filter((business) => !!business.is_new_in_scan)
+        .length,
+    [businesses, unverifiedBusinesses, visiteTerrainBusinesses]
+  );
+
+  const webKnownLeadCount = useMemo(
+    () => Math.max(0, registeredTotal - webNewLeadCount),
+    [registeredTotal, webNewLeadCount]
   );
 
   const sourceKind = useMemo(
@@ -721,13 +734,14 @@ export default function ResultsScreen() {
     setViewMode('verified');
     setBatchAuditSummary('');
     setHideAvoidLeads(true);
+    setOnlyNewLeads(true);
     setGroupByLocality(false);
     setSelectedLocality('all');
   }, [scanId]);
 
   useEffect(() => {
     applyFilter();
-  }, [activeFilter, businesses, hideAvoidLeads, sourceKind, unverifiedBusinesses, viewMode, visiteTerrainBusinesses]);
+  }, [activeFilter, businesses, hideAvoidLeads, onlyNewLeads, sourceKind, unverifiedBusinesses, viewMode, visiteTerrainBusinesses]);
 
   const getEmptyStateMessage = () => {
     if (selectedLocality !== 'all' && visibleBusinessCount === 0) {
@@ -735,6 +749,13 @@ export default function ResultsScreen() {
       return {
         title: `Aucun lead exploitable sur ${localityLabel}`,
         subtitle: 'Essaie une autre localite ou repasse sur Toutes pour retrouver la shortlist complete.',
+      };
+    }
+
+    if (sourceKind === 'web' && onlyNewLeads && activeFilter === 'all' && visibleBusinessCount === 0) {
+      return {
+        title: 'Aucun nouveau lead sur ce scan',
+        subtitle: 'Desactive "Nouveaux seulement" si tu veux revoir aussi les etablissements deja connus.',
       };
     }
 
@@ -813,6 +834,12 @@ export default function ResultsScreen() {
     }
 
     if (sourceKind === 'web') {
+      const leftNew = !!left.is_new_in_scan;
+      const rightNew = !!right.is_new_in_scan;
+      if (leftNew !== rightNew) {
+        return leftNew ? -1 : 1;
+      }
+
       const leftReadiness = getReadinessRank(left);
       const rightReadiness = getReadinessRank(right);
       if (leftReadiness !== rightReadiness) {
@@ -924,6 +951,10 @@ export default function ResultsScreen() {
 
     if (sourceKind === 'web' && hideAvoidLeads && activeFilter !== 'avoid') {
       filtered = filtered.filter((business) => business.sales_readiness_status !== 'avoid');
+    }
+
+    if (sourceKind === 'web' && onlyNewLeads && activeFilter === 'all') {
+      filtered = filtered.filter((business) => !!business.is_new_in_scan);
     }
 
     const sortedBusinesses = [...filtered].sort((left, right) => compareBusinesses(left, right));
@@ -1963,6 +1994,21 @@ export default function ResultsScreen() {
             </View>
             <View style={styles.shortlistToggleStack}>
               <TouchableOpacity
+                style={[styles.shortlistToggleButton, onlyNewLeads && styles.shortlistToggleButtonActive]}
+                onPress={() => setOnlyNewLeads((current) => !current)}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name={onlyNewLeads ? 'sparkles-outline' : 'albums-outline'}
+                  size={16}
+                  color={onlyNewLeads ? '#FFF' : '#6366F1'}
+                />
+                <Text style={[styles.shortlistToggleText, onlyNewLeads && styles.shortlistToggleTextActive]}>
+                  {onlyNewLeads ? 'Nouveaux seulement' : 'Inclure deja connus'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
                 style={[styles.shortlistToggleButton, hideAvoidLeads && styles.shortlistToggleButtonActive]}
                 onPress={() => setHideAvoidLeads((current) => !current)}
                 activeOpacity={0.8}
@@ -2079,6 +2125,13 @@ export default function ResultsScreen() {
               {hideAvoidLeads
                 ? `${stats?.readiness_avoid || 0} lead(s) a eviter sont masques de la liste principale.`
                 : `${stats?.readiness_avoid || 0} lead(s) a eviter restent visibles si tu veux les controler.`}
+            </Text>
+          ) : null}
+          {sourceKind === 'web' ? (
+            <Text style={styles.shortlistFootnote}>
+              {onlyNewLeads
+                ? `${webNewLeadCount} nouveau(x) lead(s) affiches en priorite • ${webKnownLeadCount} deja connu(s) masques.`
+                : `${webNewLeadCount} nouveau(x) lead(s) et ${webKnownLeadCount} deja connu(s) sont visibles.`}
             </Text>
           ) : null}
           {selectedLocality !== 'all' ? (
