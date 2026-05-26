@@ -240,12 +240,21 @@ def _build_sales_readiness(
     is_terrain: bool,
     client_status: str,
     crm_status: str,
+    contact_status_manual: str,
+    interest_status: str,
 ) -> tuple[str, str, str]:
     if client_status == "client":
         return (
             "avoid",
             "A eviter",
             "Deja client : ne pas retraiter commercialement dans cette liste.",
+        )
+
+    if interest_status == "not_interested":
+        return (
+            "avoid",
+            "A eviter",
+            "Lead deja qualifie non interesse : ne pas le remettre dans la file du jour.",
         )
 
     if crm_status == "in_crm":
@@ -267,6 +276,13 @@ def _build_sales_readiness(
             "field",
             "A visiter",
             "Le lead parait reel mais demande un passage terrain pour recuperer la bonne coordonnee.",
+        )
+
+    if contact_status_manual == "contacted":
+        return (
+            "review",
+            "A recouper",
+            "Lead deja contacte : priorite a une reprise qualifiee plutot qu a un nouvel appel a froid.",
         )
 
     if (
@@ -535,8 +551,10 @@ def build_solocal_priority_metadata(business: dict) -> dict:
         phone_reliability_status=phone_reliability_status,
         contact_route=contact_route,
         is_terrain=is_terrain,
-        client_status=business.get("client_status") or "not_client",
-        crm_status=business.get("crm_status") or "not_in_crm",
+        client_status=(business.get("client_status") or "not_client").strip().lower(),
+        crm_status=(business.get("crm_status") or "not_in_crm").strip().lower(),
+        contact_status_manual=(business.get("contact_status_manual") or "not_contacted").strip().lower(),
+        interest_status=(business.get("interest_status") or "unknown").strip().lower(),
     )
 
     if score >= 70:
