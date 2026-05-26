@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -60,6 +60,14 @@ interface Stats {
   with_website: number;
 }
 
+type UserSort = 'recent_login' | 'recent_created' | 'scan_volume' | 'needs_attention';
+
+interface ProvisionedCredentials {
+  email: string;
+  password: string;
+  context: string;
+}
+
 // Générateur de mot de passe sécurisé
 const generateSecurePassword = (length: number = 12): string => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
@@ -89,8 +97,10 @@ export default function AdminScreen() {
   const [activeTab, setActiveTab] = useState<'users' | 'pending'>('users');
   const [searchTerm, setSearchTerm] = useState('');
   const [userFilter, setUserFilter] = useState<'all' | 'admins' | 'internet_ready' | 'pappers_ready' | 'needs_keys' | 'disabled' | 'onboarding_pending'>('all');
+  const [userSort, setUserSort] = useState<UserSort>('needs_attention');
   const [editOnboardingCompleted, setEditOnboardingCompleted] = useState(false);
   const [editClearApiKeys, setEditClearApiKeys] = useState(false);
+  const [lastProvisionedCredentials, setLastProvisionedCredentials] = useState<ProvisionedCredentials | null>(null);
   
   useEffect(() => {
     loadData();
@@ -166,6 +176,11 @@ export default function AdminScreen() {
       setNewUserEmail('');
       setNewUserPassword('');
       setNewUserRole('user');
+      setLastProvisionedCredentials({
+        email: newUserEmail,
+        password: newUserPassword,
+        context: 'Compte cree',
+      });
       loadData();
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Erreur lors de la création';
@@ -219,6 +234,28 @@ export default function AdminScreen() {
       setNewUserPassword(newPass);
     } else {
       setEditPassword(newPass);
+    }
+  };
+
+  const copyText = async (value: string, label: string) => {
+    try {
+      if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+      if (Platform.OS === 'web') {
+        window.alert(`✅ ${label} copie`);
+      } else {
+        Alert.alert('Succes', `${label} copie`);
+      }
+    } catch (error) {
+      console.error(`Error copying ${label}:`, error);
+      if (Platform.OS === 'web') {
+        window.alert(`${label} :\n${value}`);
+      } else {
+        Alert.alert(label, value);
+      }
     }
   };
 
@@ -350,6 +387,13 @@ export default function AdminScreen() {
             }
           : u
       ));
+      if (editPassword.trim()) {
+        setLastProvisionedCredentials({
+          email: editingUser.email,
+          password: editPassword.trim(),
+          context: 'Mot de passe reinitialise',
+        });
+      }
       loadData();
 
       if (Platform.OS === 'web') {
@@ -371,6 +415,55 @@ export default function AdminScreen() {
       }
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleResetOnboarding = async (user: User) => {
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm(`Relancer l'onboarding de ${user.email} ?\n\nLe compte restera actif, mais l'utilisateur reverra le parcours de configuration.`)
+      : await new Promise<boolean>((resolve) => {
+          Alert.alert(
+            'Relancer l onboarding ?',
+            `L utilisateur ${user.email} reverra le parcours de configuration lors de sa prochaine utilisation.`,
+            [
+              { text: 'Annuler', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Relancer', onPress: () => resolve(true) },
+            ]
+          );
+        });
+
+    if (!confirmed) return;
+
+    try {
+      const token = await AsyncStorage.getItem('token');
+      await axios.patch(
+        `${API_URL}/api/admin/users/${user.id}`,
+        { onboarding_completed: false },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      setUsers((prev) => prev.map((entry) => (
+        entry.id === user.id
+          ? {
+              ...entry,
+              onboarding_completed: false,
+            }
+          : entry
+      )));
+      loadData();
+
+      if (Platform.OS === 'web') {
+        window.alert(`✅ Onboarding relance pour ${user.email}`);
+      } else {
+        Alert.alert('Succes', `Onboarding relance pour ${user.email}`);
+      }
+    } catch (error: any) {
+      const message = error.response?.data?.detail || 'Erreur lors de la relance';
+      if (Platform.OS === 'web') {
+        window.alert(`❌ ${message}`);
+      } else {
+        Alert.alert('Erreur', message);
+      }
     }
   };
 
@@ -437,30 +530,58 @@ export default function AdminScreen() {
     });
   };
 
-  const filteredUsers = users.filter((user) => {
-    const matchesSearch = !searchTerm.trim() || user.email.toLowerCase().includes(searchTerm.trim().toLowerCase());
-    if (!matchesSearch) return false;
+  const filteredUsers = useMemo(() => {
+    const filtered = users.filter((user) => {
+      const matchesSearch = !searchTerm.trim() || user.email.toLowerCase().includes(searchTerm.trim().toLowerCase());
+      if (!matchesSearch) return false;
 
-    if (userFilter === 'admins') {
-      return user.role === 'admin';
-    }
-    if (userFilter === 'internet_ready') {
-      return !!user.can_scan_internet;
-    }
-    if (userFilter === 'pappers_ready') {
-      return !!user.can_scan_pappers;
-    }
-    if (userFilter === 'needs_keys') {
-      return !user.can_scan_internet || !user.can_scan_pappers || !user.onboarding_completed;
-    }
-    if (userFilter === 'disabled') {
-      return user.is_active === false;
-    }
-    if (userFilter === 'onboarding_pending') {
-      return !user.onboarding_completed;
-    }
-    return true;
-  });
+      if (userFilter === 'admins') {
+        return user.role === 'admin';
+      }
+      if (userFilter === 'internet_ready') {
+        return !!user.can_scan_internet;
+      }
+      if (userFilter === 'pappers_ready') {
+        return !!user.can_scan_pappers;
+      }
+      if (userFilter === 'needs_keys') {
+        return !user.can_scan_internet || !user.can_scan_pappers || !user.onboarding_completed;
+      }
+      if (userFilter === 'disabled') {
+        return user.is_active === false;
+      }
+      if (userFilter === 'onboarding_pending') {
+        return !user.onboarding_completed;
+      }
+      return true;
+    });
+
+    const scoreAttention = (user: User) => {
+      let score = 0;
+      if (user.is_active === false) score += 1;
+      if (!user.onboarding_completed) score += 4;
+      if (!user.can_scan_internet) score += 3;
+      if (!user.can_scan_pappers) score += 2;
+      if (!user.last_login_at) score += 1;
+      return score;
+    };
+
+    return filtered.sort((left, right) => {
+      if (userSort === 'recent_login') {
+        return new Date(right.last_login_at || 0).getTime() - new Date(left.last_login_at || 0).getTime();
+      }
+      if (userSort === 'recent_created') {
+        return new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime();
+      }
+      if (userSort === 'scan_volume') {
+        return (right.scan_count || 0) - (left.scan_count || 0);
+      }
+
+      const attentionDiff = scoreAttention(right) - scoreAttention(left);
+      if (attentionDiff !== 0) return attentionDiff;
+      return new Date(right.last_login_at || 0).getTime() - new Date(left.last_login_at || 0).getTime();
+    });
+  }, [searchTerm, userFilter, userSort, users]);
 
   const renderUserItem = ({ item }: { item: User }) => (
     <View style={[styles.userCard, item.is_active === false && styles.userCardDisabled]}>
@@ -511,10 +632,22 @@ export default function AdminScreen() {
           </View>
         </View>
       </View>
-      <View style={styles.userActions}>
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.actionBtnEdit]}
-          onPress={() => handleOpenEditModal(item)}
+        <View style={styles.userActions}>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.actionBtnCopy]}
+            onPress={() => copyText(item.email, `Email de ${item.email}`)}
+          >
+            <Ionicons name="copy-outline" size={18} color="#0F766E" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.actionBtnReset]}
+            onPress={() => handleResetOnboarding(item)}
+          >
+            <Ionicons name="refresh-circle-outline" size={18} color="#7C3AED" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.actionBtnEdit]}
+            onPress={() => handleOpenEditModal(item)}
         >
           <Ionicons name="create-outline" size={18} color="#6366F1" />
         </TouchableOpacity>
@@ -644,6 +777,35 @@ export default function AdminScreen() {
       {/* Users List */}
       {activeTab === 'users' && (
         <>
+          {lastProvisionedCredentials ? (
+            <View style={styles.provisioningCard}>
+              <View style={styles.provisioningTextWrap}>
+                <Text style={styles.provisioningTitle}>{lastProvisionedCredentials.context}</Text>
+                <Text style={styles.provisioningSubtitle}>
+                  {lastProvisionedCredentials.email} • garde ce mot de passe ou partage-le maintenant.
+                </Text>
+                <Text style={styles.provisioningPassword}>🔐 {lastProvisionedCredentials.password}</Text>
+              </View>
+              <View style={styles.provisioningActions}>
+                <TouchableOpacity
+                  style={styles.provisioningAction}
+                  onPress={() => copyText(
+                    `${lastProvisionedCredentials.email}\n${lastProvisionedCredentials.password}`,
+                    'Acces utilisateur'
+                  )}
+                >
+                  <Ionicons name="copy-outline" size={16} color="#FFF" />
+                  <Text style={styles.provisioningActionText}>Copier</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.provisioningDismiss}
+                  onPress={() => setLastProvisionedCredentials(null)}
+                >
+                  <Ionicons name="close-outline" size={16} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
           <View style={styles.filtersBar}>
             <View style={styles.searchInputWrap}>
               <Ionicons name="search" size={16} color="#666" />
@@ -673,6 +835,24 @@ export default function AdminScreen() {
                 >
                   <Text style={[styles.filterChipText, userFilter === filter.id && styles.filterChipTextActive]}>
                     {filter.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sortChipsRow}>
+              {[
+                { id: 'needs_attention', label: 'A traiter d abord' },
+                { id: 'recent_login', label: 'Derniere connexion' },
+                { id: 'recent_created', label: 'Plus recents' },
+                { id: 'scan_volume', label: 'Plus de scans' },
+              ].map((sortOption) => (
+                <TouchableOpacity
+                  key={sortOption.id}
+                  style={[styles.sortChip, userSort === sortOption.id && styles.sortChipActive]}
+                  onPress={() => setUserSort(sortOption.id as UserSort)}
+                >
+                  <Text style={[styles.sortChipText, userSort === sortOption.id && styles.sortChipTextActive]}>
+                    {sortOption.label}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -1158,6 +1338,11 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingRight: 16,
   },
+  sortChipsRow: {
+    gap: 8,
+    paddingRight: 16,
+    paddingBottom: 4,
+  },
   filterChip: {
     backgroundColor: '#FFF',
     paddingHorizontal: 12,
@@ -1177,6 +1362,79 @@ const styles = StyleSheet.create({
   },
   filterChipTextActive: {
     color: '#6366F1',
+  },
+  sortChip: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  sortChipActive: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#10B981',
+  },
+  sortChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
+  sortChipTextActive: {
+    color: '#047857',
+  },
+  provisioningCard: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: '#111827',
+    borderRadius: 16,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  provisioningTextWrap: {
+    flex: 1,
+    gap: 4,
+  },
+  provisioningTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  provisioningSubtitle: {
+    fontSize: 12,
+    color: '#D1D5DB',
+    lineHeight: 18,
+  },
+  provisioningPassword: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#A7F3D0',
+  },
+  provisioningActions: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  provisioningAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#2563EB',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  provisioningActionText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  provisioningDismiss: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 999,
+    padding: 8,
   },
   userCard: {
     backgroundColor: '#FFF',
@@ -1285,6 +1543,12 @@ const styles = StyleSheet.create({
   },
   actionBtnDelete: {
     backgroundColor: '#FFEBEE',
+  },
+  actionBtnCopy: {
+    backgroundColor: '#ECFDF5',
+  },
+  actionBtnReset: {
+    backgroundColor: '#F5F3FF',
   },
   emptyText: {
     textAlign: 'center',

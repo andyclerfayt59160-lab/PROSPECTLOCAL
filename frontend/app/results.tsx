@@ -1843,6 +1843,11 @@ export default function ResultsScreen() {
       const isAuditingLead = auditingBusinessIds.includes(item.id);
       const hasAuditSnapshot = !!item.visibility_audited_at || !!item.legal_presence_audited_at;
       const canSendToTerrain = viewMode !== 'visite_terrain' && item.sales_readiness_status !== 'field';
+      const readinessReason =
+        item.sales_readiness_reason || item.contact_route_reason || item.phone_reliability_reason || null;
+      const offerReason =
+        item.sales_pitch_hint || item.recommended_offer_reason || item.digital_visibility_summary || null;
+      const secondaryOfferReason = offerReason && offerReason !== readinessReason ? offerReason : null;
     
     return (
       <TouchableOpacity 
@@ -1954,7 +1959,7 @@ export default function ResultsScreen() {
                 </Text>
               </View>
             ) : null}
-            {!!item.next_best_action && (
+          {!!item.next_best_action && (
             <View style={styles.nextActionBadge}>
               <Ionicons name="flash-outline" size={12} color="#6D28D9" />
               <Text style={styles.nextActionBadgeText} numberOfLines={1}>
@@ -1962,6 +1967,22 @@ export default function ResultsScreen() {
               </Text>
             </View>
           )}
+          {sourceKind === 'web' && readinessReason ? (
+            <View style={styles.whyNowRow}>
+              <Ionicons name="information-circle-outline" size={12} color="#475569" />
+              <Text style={styles.whyNowText} numberOfLines={2}>
+                {readinessReason}
+              </Text>
+            </View>
+          ) : null}
+          {sourceKind === 'web' && secondaryOfferReason ? (
+            <View style={styles.offerHintRow}>
+              <Ionicons name="megaphone-outline" size={12} color="#1D4ED8" />
+              <Text style={styles.offerHintText} numberOfLines={2}>
+                {secondaryOfferReason}
+              </Text>
+            </View>
+          ) : null}
           {item.related_clue_potential && (
             <TouchableOpacity
               style={styles.reboundBadge}
@@ -3085,6 +3106,32 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#6D28D9',
+  },
+  whyNowRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 2,
+  },
+  whyNowText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#475569',
+  },
+  offerHintRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 2,
+  },
+  offerHintText: {
+    flex: 1,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#1D4ED8',
   },
   reboundBadge: {
     marginTop: 6,
