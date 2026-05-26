@@ -848,6 +848,12 @@ export default function ResultsScreen() {
         return leftReadiness - rightReadiness;
       }
 
+      const leftNeedsAudit = needsQuickAudit(left);
+      const rightNeedsAudit = needsQuickAudit(right);
+      if (leftNeedsAudit !== rightNeedsAudit) {
+        return leftNeedsAudit ? -1 : 1;
+      }
+
       const leftLegal = getLegalRank(left);
       const rightLegal = getLegalRank(right);
       if (leftLegal !== rightLegal) {
@@ -1064,6 +1070,24 @@ export default function ResultsScreen() {
       };
     }
 
+    if (shortlistNeedsAuditCount > 0) {
+      return {
+        label: 'File a auditer',
+        detail: `${shortlistNeedsAuditCount} lead(s) nouveau(x) demandent encore une verification Google, PagesJaunes ou legale avant relance.`,
+        action: () => {
+          setViewMode('verified');
+          setActiveFilter('needs_audit');
+          setOnlyNewLeads(true);
+          setGroupByLocality(false);
+          setListFocusMode(true);
+        },
+        actionLabel: 'Ouvrir les audits du jour',
+        style: styles.dailyQueueBannerAudit,
+        iconColor: '#0F766E',
+        buttonStyle: styles.dailyQueueButtonAudit,
+      };
+    }
+
     if (shortlistReadinessCounts.review > 0) {
       return {
         label: 'File a recouper',
@@ -1112,7 +1136,7 @@ export default function ResultsScreen() {
       iconColor: '#475569',
       buttonStyle: styles.dailyQueueButtonNeutral,
     };
-  }, [shortlistReadinessCounts, sourceKind]);
+  }, [shortlistNeedsAuditCount, shortlistReadinessCounts, sourceKind]);
 
   useEffect(() => {
     if (selectedLocality === 'all') return;
@@ -3671,6 +3695,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#FEF3C7',
     borderColor: '#FCD34D',
   },
+  dailyQueueBannerAudit: {
+    backgroundColor: '#ECFEFF',
+    borderColor: '#A5F3FC',
+  },
   dailyQueueBannerField: {
     backgroundColor: '#F5F3FF',
     borderColor: '#DDD6FE',
@@ -3707,6 +3735,9 @@ const styles = StyleSheet.create({
   },
   dailyQueueButtonReview: {
     backgroundColor: '#B45309',
+  },
+  dailyQueueButtonAudit: {
+    backgroundColor: '#0F766E',
   },
   dailyQueueButtonField: {
     backgroundColor: '#6D28D9',
