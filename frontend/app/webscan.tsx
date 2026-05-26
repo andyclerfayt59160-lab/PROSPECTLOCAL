@@ -532,7 +532,7 @@ export default function WebScanScreen() {
           [
             {
               text: 'Voir les résultats',
-              onPress: () => router.push(`/results?scanId=${response.data.scan_id}`),
+              onPress: () => router.push(`/results?scanId=${response.data.scan_id}&direct=1`),
             },
           ]
         );
@@ -596,7 +596,7 @@ export default function WebScanScreen() {
           [
             {
               text: 'Voir les resultats',
-              onPress: () => router.push(`/results?scanId=${response.data.scan_id}`),
+              onPress: () => router.push(`/results?scanId=${response.data.scan_id}&direct=1`),
             },
           ]
         );
@@ -821,7 +821,7 @@ export default function WebScanScreen() {
           [
             {
               text: 'Voir les resultats',
-              onPress: () => router.push(`/results?scanId=${response.data.scan_id}`),
+              onPress: () => router.push(`/results?scanId=${response.data.scan_id}&direct=1`),
             },
           ]
         );
@@ -1255,7 +1255,7 @@ export default function WebScanScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.recentScanOpenBtn}
-                      onPress={() => router.push(`/results?scanId=${scan.id}`)}
+                      onPress={() => router.push(`/results?scanId=${scan.id}&direct=1`)}
                       activeOpacity={0.75}
                     >
                       <Ionicons name="open-outline" size={16} color="#4F46E5" />

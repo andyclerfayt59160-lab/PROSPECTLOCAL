@@ -51,7 +51,7 @@ function getNotificationTarget(notification: any) {
   const businessId = notification?.business_id || notification?.data?.business_id;
 
   if (scanId) {
-    return `/results?scanId=${scanId}`;
+    return `/results?scanId=${scanId}&direct=1`;
   }
   if (businessId) {
     return `/businessdetail?businessId=${businessId}`;

@@ -401,7 +401,7 @@ export default function NewScanScreen() {
       if (response.data.id) {
         router.replace({
           pathname: '/results',
-          params: { scanId: response.data.id },
+          params: { scanId: response.data.id, direct: '1' },
         });
       }
     } catch (error: any) {

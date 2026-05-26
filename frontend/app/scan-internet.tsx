@@ -796,7 +796,7 @@ export default function ScanInternetScreen() {
             [
               {
                 text: 'Voir les resultats',
-                onPress: () => router.push(`/results?scanId=${response.data.scan_id}`),
+                onPress: () => router.push(`/results?scanId=${response.data.scan_id}&direct=1`),
               },
             ]
           );
@@ -828,7 +828,7 @@ export default function ScanInternetScreen() {
           [
             {
               text: 'Voir les résultats',
-              onPress: () => router.push(`/results?scanId=${response.data.scan_id}`),
+              onPress: () => router.push(`/results?scanId=${response.data.scan_id}&direct=1`),
             },
           ]
         );
@@ -910,7 +910,7 @@ export default function ScanInternetScreen() {
           [
             {
               text: 'Voir les resultats',
-              onPress: () => router.push(`/results?scanId=${response.data.scan_id}`),
+              onPress: () => router.push(`/results?scanId=${response.data.scan_id}&direct=1`),
             },
           ]
         );
@@ -1014,7 +1014,7 @@ export default function ScanInternetScreen() {
 
         <TouchableOpacity
           style={styles.viewBtn}
-          onPress={() => router.push(`/results?scanId=${item.id}`)}
+          onPress={() => router.push(`/results?scanId=${item.id}&direct=1`)}
         >
           <Ionicons name="eye" size={18} color="#FFF" />
           <Text style={styles.viewBtnText}>Voir</Text>

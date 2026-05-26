@@ -508,6 +508,7 @@ export default function ResultsScreen() {
   const router = useRouter();
   const {
     scanId,
+    direct,
     source,
     cityLabel,
     radiusKm,
@@ -527,6 +528,11 @@ export default function ResultsScreen() {
     postalAvailable,
   } = useLocalSearchParams();
   const { showToast } = useToast();
+  const directResultsMode = useMemo(() => {
+    const rawValue = Array.isArray(direct) ? direct[0] : direct;
+    const normalized = String(rawValue || '').trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'direct';
+  }, [direct]);
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [unverifiedBusinesses, setUnverifiedBusinesses] = useState<Business[]>([]);
   const [visiteTerrainBusinesses, setVisiteTerrainBusinesses] = useState<Business[]>([]);
@@ -539,7 +545,7 @@ export default function ResultsScreen() {
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [viewMode, setViewMode] = useState<ViewMode>('verified');
   const [summaryExpanded, setSummaryExpanded] = useState(false);
-  const [listFocusMode, setListFocusMode] = useState(true);
+  const [listFocusMode, setListFocusMode] = useState(false);
   const [auditingTopLeads, setAuditingTopLeads] = useState(false);
   const [auditingBusinessIds, setAuditingBusinessIds] = useState<string[]>([]);
   const [batchAuditSummary, setBatchAuditSummary] = useState('');
@@ -735,11 +741,12 @@ export default function ResultsScreen() {
     setActiveFilter('all');
     setViewMode('verified');
     setBatchAuditSummary('');
-    setHideAvoidLeads(true);
-    setOnlyNewLeads(true);
+    setHideAvoidLeads(!directResultsMode);
+    setOnlyNewLeads(!directResultsMode);
     setGroupByLocality(false);
     setSelectedLocality('all');
-  }, [scanId]);
+    setListFocusMode(false);
+  }, [directResultsMode, scanId]);
 
   useEffect(() => {
     applyFilter();
@@ -2227,52 +2234,56 @@ export default function ResultsScreen() {
         </TouchableOpacity>
       </View>
 
-      <ResultsScanSummary
-        visible={!listFocusMode}
-        source={scanSummary.sourceKind}
-        sourceLabel={scanSummary.sourceLabel}
-        zone={scanSummary.zone}
-        period={scanSummary.period}
-        viewLabel={currentViewLabel}
-        currentViewCount={currentViewCount}
-        filteredCount={visibleBusinessCount}
-        coverage={scanSummary.coverage}
-        resultMix={scanSummary.resultMix}
-        diagnosticMix={scanSummary.diagnosticMix}
-        premiumLabel={scanSummary.profitabilitySummary?.label}
-        premiumColor={scanSummary.profitabilitySummary?.color}
-        premiumBackgroundColor={scanSummary.profitabilitySummary?.backgroundColor}
-        premiumSummary={scanSummary.profitabilitySummary?.summary}
-        premiumCost={scanSummary.profitabilitySummary?.cost}
-        premiumAction={scanSummary.profitabilitySummary?.action}
-        summaryExpanded={summaryExpanded}
-        onToggleSummary={() => setSummaryExpanded((current) => !current)}
-      />
+      {!directResultsMode ? (
+        <>
+          <ResultsScanSummary
+            visible={!listFocusMode}
+            source={scanSummary.sourceKind}
+            sourceLabel={scanSummary.sourceLabel}
+            zone={scanSummary.zone}
+            period={scanSummary.period}
+            viewLabel={currentViewLabel}
+            currentViewCount={currentViewCount}
+            filteredCount={visibleBusinessCount}
+            coverage={scanSummary.coverage}
+            resultMix={scanSummary.resultMix}
+            diagnosticMix={scanSummary.diagnosticMix}
+            premiumLabel={scanSummary.profitabilitySummary?.label}
+            premiumColor={scanSummary.profitabilitySummary?.color}
+            premiumBackgroundColor={scanSummary.profitabilitySummary?.backgroundColor}
+            premiumSummary={scanSummary.profitabilitySummary?.summary}
+            premiumCost={scanSummary.profitabilitySummary?.cost}
+            premiumAction={scanSummary.profitabilitySummary?.action}
+            summaryExpanded={summaryExpanded}
+            onToggleSummary={() => setSummaryExpanded((current) => !current)}
+          />
 
-      <ResultsOverview
-        listFocusMode={listFocusMode}
-        total={stats?.total || (businesses.length + unverifiedBusinesses.length + visiteTerrainBusinesses.length)}
-        totalVerified={stats?.total_verified || businesses.length}
-        totalUnverified={stats?.total_unverified || unverifiedBusinesses.length}
-        totalVisiteTerrain={stats?.total_visite_terrain || visiteTerrainBusinesses.length}
-        opportunityMax={stats?.opportunity_max || 0}
-        legalConfirmed={stats?.legal_confirmed || 0}
-        legalMissing={stats?.legal_missing || 0}
-        auditedVisibility={stats?.audited_visibility || 0}
-        needsAudit={stats?.needs_audit || 0}
-        offerPackVisibility={stats?.offer_pack_visibility || 0}
-        offerGoogleBusiness={stats?.offer_google_business || 0}
-        offerWebsite={stats?.offer_website || 0}
-        offerGoogleReviews={stats?.offer_google_reviews || 0}
-        readinessReadyCall={stats?.readiness_ready_call || 0}
-        readinessReview={stats?.readiness_review || 0}
-        readinessField={stats?.readiness_field || 0}
-        readinessAvoid={stats?.readiness_avoid || 0}
-        currentViewLabel={currentViewLabel}
-        currentViewCount={currentViewCount}
-      />
+          <ResultsOverview
+            listFocusMode={listFocusMode}
+            total={stats?.total || (businesses.length + unverifiedBusinesses.length + visiteTerrainBusinesses.length)}
+            totalVerified={stats?.total_verified || businesses.length}
+            totalUnverified={stats?.total_unverified || unverifiedBusinesses.length}
+            totalVisiteTerrain={stats?.total_visite_terrain || visiteTerrainBusinesses.length}
+            opportunityMax={stats?.opportunity_max || 0}
+            legalConfirmed={stats?.legal_confirmed || 0}
+            legalMissing={stats?.legal_missing || 0}
+            auditedVisibility={stats?.audited_visibility || 0}
+            needsAudit={stats?.needs_audit || 0}
+            offerPackVisibility={stats?.offer_pack_visibility || 0}
+            offerGoogleBusiness={stats?.offer_google_business || 0}
+            offerWebsite={stats?.offer_website || 0}
+            offerGoogleReviews={stats?.offer_google_reviews || 0}
+            readinessReadyCall={stats?.readiness_ready_call || 0}
+            readinessReview={stats?.readiness_review || 0}
+            readinessField={stats?.readiness_field || 0}
+            readinessAvoid={stats?.readiness_avoid || 0}
+            currentViewLabel={currentViewLabel}
+            currentViewCount={currentViewCount}
+          />
+        </>
+      ) : null}
 
-      {sourceKind === 'web' ? (
+      {!directResultsMode && sourceKind === 'web' ? (
         <View style={styles.batchAuditCard}>
           <View style={styles.batchAuditHeader}>
             <View style={styles.batchAuditTextWrap}>
@@ -2303,7 +2314,7 @@ export default function ResultsScreen() {
         </View>
       ) : null}
 
-      {sourceKind === 'web' ? (
+      {!directResultsMode && sourceKind === 'web' ? (
         <View style={styles.shortlistCard}>
           <View style={styles.shortlistHeader}>
             <View style={styles.shortlistTextWrap}>
@@ -2501,7 +2512,7 @@ export default function ResultsScreen() {
       ) : null}
 
       <ResultsViewTabs
-        visible={!listFocusMode}
+        visible={directResultsMode || !listFocusMode}
         viewMode={viewMode}
         onChangeViewMode={(mode) => {
           setViewMode(mode);
@@ -2513,7 +2524,7 @@ export default function ResultsScreen() {
       />
 
       <ResultsFilterBar
-        visible={!listFocusMode}
+        visible={directResultsMode || !listFocusMode}
         activeFilter={activeFilter}
         onChangeFilter={(filter) => setActiveFilter(filter as FilterType)}
         totalCurrentView={viewMode === 'verified' ? businesses.length : viewMode === 'unverified' ? unverifiedBusinesses.length : visiteTerrainBusinesses.length}

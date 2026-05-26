@@ -236,7 +236,7 @@ export default function DashboardScreen() {
         [
           { 
             text: 'Voir les résultats', 
-            onPress: () => router.push({ pathname: '/results', params: { scanId } })
+            onPress: () => router.push({ pathname: '/results', params: { scanId, direct: '1' } })
           }
         ]
       );
@@ -535,7 +535,7 @@ export default function DashboardScreen() {
         {/* View button */}
         <TouchableOpacity
           style={[styles.actionBtn, styles.actionBtnView]}
-          onPress={() => router.push({ pathname: '/results', params: { scanId: item.id } })}
+          onPress={() => router.push({ pathname: '/results', params: { scanId: item.id, direct: '1' } })}
         >
           <Ionicons name="eye" size={18} color="#FFF" />
           <Text style={styles.actionBtnText}>Voir</Text>
@@ -572,7 +572,7 @@ export default function DashboardScreen() {
         handleMarkNotificationRead(item.id);
         if (item.scan_id) {
           setShowNotifications(false);
-          router.push({ pathname: '/results', params: { scanId: item.scan_id } });
+          router.push({ pathname: '/results', params: { scanId: item.scan_id, direct: '1' } });
         }
       }}
     >

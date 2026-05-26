@@ -105,7 +105,7 @@ export default function NotificationsScreen() {
 
     // Navigate based on notification type
     if (scanId) {
-      router.push(`/results?scanId=${scanId}`);
+      router.push(`/results?scanId=${scanId}&direct=1`);
     } else if (businessId) {
       router.push(`/businessdetail?businessId=${businessId}`);
     }
