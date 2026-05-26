@@ -19,6 +19,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useScan } from '../context/ScanContext';
 
 import { API_URL } from '../utils/api';
+import { clearStoredSession, handleAuthError, redirectToLogin } from '../utils/authHelpers';
 
 interface DailyCockpitStats {
   aTraiter: number;
@@ -234,7 +235,7 @@ export default function HomeScreen() {
   const checkAuth = async () => {
     const token = await AsyncStorage.getItem('token');
     if (!token) {
-      router.replace('/');
+      redirectToLogin(router);
       return;
     }
     const name = await AsyncStorage.getItem('userName');
@@ -256,7 +257,10 @@ export default function HomeScreen() {
       setShowApiOnboarding(!hasGoogle || !hasSerper);
     } catch (error) {
       console.error('Error checking API keys:', error);
-      setShowApiOnboarding(false);
+      const wasAuthError = await handleAuthError(error, true, router);
+      if (!wasAuthError) {
+        setShowApiOnboarding(false);
+      }
     }
   };
 
@@ -323,12 +327,13 @@ export default function HomeScreen() {
       setActionBrief(brief);
     } catch (error) {
       console.error('Error loading cockpit stats:', error);
+      await handleAuthError(error, true, router);
     }
   };
 
   const handleLogout = async () => {
-    await AsyncStorage.multiRemove(['token', 'user', 'userName', 'userEmail']);
-    router.replace('/');
+    await clearStoredSession();
+    redirectToLogin(router);
   };
 
   const markAllRead = async () => {

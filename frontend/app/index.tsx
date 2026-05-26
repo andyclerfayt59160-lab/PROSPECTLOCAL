@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { validateStoredSession } from '../utils/authHelpers';
 
 export default function Index() {
   const router = useRouter();
@@ -11,15 +12,9 @@ export default function Index() {
   }, []);
 
   const checkAuth = async () => {
-    try {
-      const token = await AsyncStorage.getItem('token');
-      if (token) {
-        router.replace('/home');
-      } else {
-        router.replace('/login');
-      }
-    } catch (error) {
-      router.replace('/login');
+    const hasValidSession = await validateStoredSession(router);
+    if (hasValidSession) {
+      router.replace('/home');
     }
   };
 

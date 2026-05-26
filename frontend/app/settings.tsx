@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ProspectLocalLogo } from '../components/ProspectLocalLogo';
 
 import { API_URL } from '../utils/api';
+import { clearStoredSession, handleAuthError, redirectToLogin } from '../utils/authHelpers';
 
 // Informations sur les API avec les offres gratuites
 const API_INFO = {
@@ -156,10 +157,20 @@ export default function SettingsScreen() {
     loadNotificationPreferences();
     loadUsageStats();
   }, []);
+
+  const getTokenOrRedirect = async () => {
+    const token = await AsyncStorage.getItem('token');
+    if (!token) {
+      await clearStoredSession();
+      redirectToLogin(router);
+      return null;
+    }
+    return token;
+  };
   
   const loadUsageStats = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getTokenOrRedirect();
       if (!token) return;
       
       const response = await axios.get(`${API_URL}/api/api-usage/stats`, {
@@ -169,6 +180,7 @@ export default function SettingsScreen() {
       setUsageStats(response.data);
     } catch (error) {
       console.error('Error loading usage stats:', error);
+      await handleAuthError(error, true, router);
     } finally {
       setLoadingUsage(false);
     }
@@ -176,7 +188,7 @@ export default function SettingsScreen() {
   
   const loadNotificationPreferences = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getTokenOrRedirect();
       if (!token) return;
       
       const response = await axios.get(`${API_URL}/api/user/notification-preferences`, {
@@ -205,13 +217,15 @@ export default function SettingsScreen() {
       });
     } catch (error) {
       console.error('Error loading notification preferences:', error);
+      await handleAuthError(error, true, router);
     }
   };
   
   const saveNotificationPreferences = async (newPrefs: typeof notifPrefs) => {
     setSavingNotifs(true);
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getTokenOrRedirect();
+      if (!token) return;
       await axios.put(
         `${API_URL}/api/user/notification-preferences`,
         newPrefs,
@@ -220,6 +234,7 @@ export default function SettingsScreen() {
       setNotifPrefs(newPrefs);
     } catch (error) {
       console.error('Error saving notification preferences:', error);
+      await handleAuthError(error, true, router);
     } finally {
       setSavingNotifs(false);
     }
@@ -232,12 +247,8 @@ export default function SettingsScreen() {
 
   const loadApiKeys = async () => {
     try {
-      const token = await AsyncStorage.getItem('token');
-      if (!token) {
-        console.error('No token found, retrying...');
-        setTimeout(loadApiKeys, 500);
-        return;
-      }
+      const token = await getTokenOrRedirect();
+      if (!token) return;
       
       const response = await axios.get(`${API_URL}/api/user/api-keys`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -251,10 +262,7 @@ export default function SettingsScreen() {
       console.log('API keys status loaded:', response.data);
     } catch (error: any) {
       console.error('Error loading API keys:', error);
-      // Retry on 401 error
-      if (error.response?.status === 401) {
-        setTimeout(loadApiKeys, 1000);
-      }
+      await handleAuthError(error, true, router);
     } finally {
       setLoading(false);
     }
@@ -274,7 +282,8 @@ export default function SettingsScreen() {
 
     setSaving(true);
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getTokenOrRedirect();
+      if (!token) return;
       await axios.put(
         `${API_URL}/api/user/api-keys`,
         apiKeys,
@@ -297,6 +306,10 @@ export default function SettingsScreen() {
         pappers_api_key: '',
       });
     } catch (error: any) {
+      const wasAuthError = await handleAuthError(error, true, router);
+      if (wasAuthError) {
+        return;
+      }
       const message = error.response?.data?.detail || 'Erreur lors de la sauvegarde';
       if (Platform.OS === 'web') {
         window.alert(`❌ ${message}`);
@@ -325,7 +338,8 @@ export default function SettingsScreen() {
     if (!confirmDelete) return;
 
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getTokenOrRedirect();
+      if (!token) return;
       await axios.delete(
         `${API_URL}/api/user/api-keys/${keyName}`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -333,6 +347,7 @@ export default function SettingsScreen() {
       loadApiKeys();
     } catch (error) {
       console.error('Error deleting key:', error);
+      await handleAuthError(error, true, router);
     }
   };
 
@@ -342,13 +357,14 @@ export default function SettingsScreen() {
       if (Platform.OS === 'web') {
         window.alert(message);
       } else {
-        Alert.alert('Configuration incomplete', message);
+        Alert.alert('Configuration incomplète', message);
       }
       return;
     }
 
     try {
-      const token = await AsyncStorage.getItem('token');
+      const token = await getTokenOrRedirect();
+      if (!token) return;
       await axios.post(
         `${API_URL}/api/user/complete-onboarding`,
         {},
@@ -357,10 +373,14 @@ export default function SettingsScreen() {
       router.replace('/home');
     } catch (error) {
       console.error('Error completing onboarding:', error);
+      const wasAuthError = await handleAuthError(error, true, router);
+      if (wasAuthError) {
+        return;
+      }
       if (Platform.OS === 'web') {
-        window.alert('Impossible de finaliser l activation pour le moment.');
+        window.alert('Impossible de finaliser l’activation pour le moment.');
       } else {
-        Alert.alert('Erreur', 'Impossible de finaliser l activation pour le moment.');
+        Alert.alert('Erreur', 'Impossible de finaliser l’activation pour le moment.');
       }
     }
   };
@@ -509,7 +529,7 @@ export default function SettingsScreen() {
           <View style={styles.onboardingHero}>
             <View style={styles.onboardingHeroHeader}>
               <Ionicons name="shield-checkmark" size={24} color="#4F46E5" />
-              <Text style={styles.onboardingHeroTitle}>Premiere configuration securisee</Text>
+              <Text style={styles.onboardingHeroTitle}>Première configuration sécurisée</Text>
             </View>
             <Text style={styles.onboardingHeroText}>
               Chaque compte doit renseigner ses propres cles API. Aucune cle personnelle n est partagee avec les autres utilisateurs.
@@ -518,7 +538,7 @@ export default function SettingsScreen() {
               <Text style={styles.onboardingStep}>1. Ouvre Google Places et recupere ta cle Google.</Text>
               <Text style={styles.onboardingStep}>2. Ouvre Serper.dev et recupere ta cle Serper.</Text>
               <Text style={styles.onboardingStep}>3. Pappers est optionnelle, utile pour le scan Pappers.</Text>
-              <Text style={styles.onboardingStep}>4. Enregistre les cles puis termine l activation.</Text>
+              <Text style={styles.onboardingStep}>4. Enregistre les clés puis termine l’activation.</Text>
             </View>
             <View style={styles.onboardingQuickLinks}>
               <TouchableOpacity
@@ -557,7 +577,7 @@ export default function SettingsScreen() {
                 color="#FFF"
               />
               <Text style={styles.onboardingFinishBtnText}>
-                {requiredKeysReady ? 'Terminer l activation' : 'Google + Serper requis'}
+                {requiredKeysReady ? 'Terminer l’activation' : 'Google + Serper requis'}
               </Text>
             </TouchableOpacity>
           </View>

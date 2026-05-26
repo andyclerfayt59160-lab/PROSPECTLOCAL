@@ -18,6 +18,7 @@ import { ProspectLocalLogo } from '../components/ProspectLocalLogo';
 import { useToast } from '../components/Toast';
 
 import { API_URL } from '../utils/api';
+import { validateStoredSession } from '../utils/authHelpers';
 const REMEMBERED_EMAIL_KEY = 'rememberedEmail';
 
 function AuthFormShell({
@@ -60,7 +61,7 @@ export default function LoginScreen() {
           setEmail(emailValue);
         }
 
-        if (tokenValue) {
+        if (tokenValue && (await validateStoredSession())) {
           router.replace('/home');
         }
       } catch (error) {
