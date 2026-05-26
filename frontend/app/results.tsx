@@ -988,6 +988,127 @@ export default function ResultsScreen() {
     });
   }, [filteredBusinesses, sourceKind]);
 
+  const shortlistScopeBusinesses = useMemo(() => {
+    if (sourceKind !== 'web') return [] as Business[];
+
+    return [...businesses, ...unverifiedBusinesses, ...visiteTerrainBusinesses].filter((business) => {
+      if (selectedLocality !== 'all' && getLocalityKey(business) !== selectedLocality) {
+        return false;
+      }
+      if (onlyNewLeads && !business.is_new_in_scan) {
+        return false;
+      }
+      if (hideAvoidLeads && business.sales_readiness_status === 'avoid') {
+        return false;
+      }
+      return true;
+    });
+  }, [
+    businesses,
+    hideAvoidLeads,
+    onlyNewLeads,
+    selectedLocality,
+    sourceKind,
+    unverifiedBusinesses,
+    visiteTerrainBusinesses,
+  ]);
+
+  const shortlistReadinessCounts = useMemo(() => {
+    return shortlistScopeBusinesses.reduce(
+      (acc, business) => {
+        switch (business.sales_readiness_status) {
+          case 'ready_call':
+            acc.ready_call += 1;
+            break;
+          case 'review':
+            acc.review += 1;
+            break;
+          case 'field':
+            acc.field += 1;
+            break;
+          case 'avoid':
+            acc.avoid += 1;
+            break;
+          default:
+            break;
+        }
+        return acc;
+      },
+      { ready_call: 0, review: 0, field: 0, avoid: 0 }
+    );
+  }, [shortlistScopeBusinesses]);
+
+  const dailyQueueState = useMemo(() => {
+    if (sourceKind !== 'web') return null;
+
+    if (shortlistReadinessCounts.ready_call > 0) {
+      return {
+        label: 'File du jour prete',
+        detail: `${shortlistReadinessCounts.ready_call} lead(s) nouveau(x) sont prets a appeler tout de suite.`,
+        action: () => {
+          setViewMode('verified');
+          setActiveFilter('ready_call');
+          setOnlyNewLeads(true);
+          setGroupByLocality(false);
+          setListFocusMode(true);
+        },
+        actionLabel: 'Ouvrir les appels du jour',
+        style: styles.dailyQueueBannerCall,
+        iconColor: '#047857',
+        buttonStyle: styles.dailyQueueButtonCall,
+      };
+    }
+
+    if (shortlistReadinessCounts.review > 0) {
+      return {
+        label: 'File a recouper',
+        detail: `${shortlistReadinessCounts.review} lead(s) nouveau(x) meritent une verification rapide avant relance.`,
+        action: () => {
+          setViewMode('verified');
+          setActiveFilter('review');
+          setOnlyNewLeads(true);
+          setGroupByLocality(false);
+          setListFocusMode(true);
+        },
+        actionLabel: 'Ouvrir les recoupements',
+        style: styles.dailyQueueBannerReview,
+        iconColor: '#B45309',
+        buttonStyle: styles.dailyQueueButtonReview,
+      };
+    }
+
+    if (shortlistReadinessCounts.field > 0) {
+      return {
+        label: 'File terrain',
+        detail: `${shortlistReadinessCounts.field} lead(s) nouveau(x) demandent plutot un passage terrain.`,
+        action: () => {
+          setViewMode('visite_terrain');
+          setActiveFilter('field');
+          setOnlyNewLeads(true);
+          setGroupByLocality(false);
+          setListFocusMode(true);
+        },
+        actionLabel: 'Ouvrir le terrain du jour',
+        style: styles.dailyQueueBannerField,
+        iconColor: '#6D28D9',
+        buttonStyle: styles.dailyQueueButtonField,
+      };
+    }
+
+    return {
+      label: 'Aucun lead chaud neuf',
+      detail: 'Le scan ne sort pas encore de nouveau lead immediatement actionnable dans ce scope.',
+      action: () => {
+        setOnlyNewLeads(false);
+        setActiveFilter('all');
+      },
+      actionLabel: 'Revoir aussi les deja connus',
+      style: styles.dailyQueueBannerNeutral,
+      iconColor: '#475569',
+      buttonStyle: styles.dailyQueueButtonNeutral,
+    };
+  }, [shortlistReadinessCounts, sourceKind]);
+
   useEffect(() => {
     if (selectedLocality === 'all') return;
     const stillAvailable = localityOptions.some((option) => option.key === selectedLocality);
@@ -2051,7 +2172,7 @@ export default function ResultsScreen() {
             >
               <Ionicons name="call-outline" size={16} color="#047857" />
               <Text style={styles.shortlistActionLabel}>A appeler</Text>
-              <Text style={styles.shortlistActionCount}>{stats?.readiness_ready_call || 0}</Text>
+              <Text style={styles.shortlistActionCount}>{shortlistReadinessCounts.ready_call}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -2064,7 +2185,7 @@ export default function ResultsScreen() {
             >
               <Ionicons name="search-outline" size={16} color="#B45309" />
               <Text style={styles.shortlistActionLabel}>A recouper</Text>
-              <Text style={styles.shortlistActionCount}>{stats?.readiness_review || 0}</Text>
+              <Text style={styles.shortlistActionCount}>{shortlistReadinessCounts.review}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -2077,9 +2198,32 @@ export default function ResultsScreen() {
             >
               <Ionicons name="walk-outline" size={16} color="#6D28D9" />
               <Text style={styles.shortlistActionLabel}>A visiter</Text>
-              <Text style={styles.shortlistActionCount}>{stats?.readiness_field || 0}</Text>
+              <Text style={styles.shortlistActionCount}>{shortlistReadinessCounts.field}</Text>
             </TouchableOpacity>
           </View>
+
+          {dailyQueueState ? (
+            <View style={[styles.dailyQueueBanner, dailyQueueState.style]}>
+              <View style={styles.dailyQueueTextWrap}>
+                <View style={styles.dailyQueueTitleRow}>
+                  <Ionicons name="flash-outline" size={16} color={dailyQueueState.iconColor} />
+                  <Text style={[styles.dailyQueueTitle, { color: dailyQueueState.iconColor }]}>
+                    {dailyQueueState.label}
+                  </Text>
+                </View>
+                <Text style={styles.dailyQueueDetail}>
+                  {dailyQueueState.detail}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.dailyQueueButton, dailyQueueState.buttonStyle]}
+                onPress={dailyQueueState.action}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.dailyQueueButtonText}>{dailyQueueState.actionLabel}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           {localityOptions.length > 0 ? (
             <View style={styles.localityFocusWrap}>
@@ -3311,6 +3455,68 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
     color: '#111827',
+  },
+  dailyQueueBanner: {
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    gap: 12,
+  },
+  dailyQueueBannerCall: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  dailyQueueBannerReview: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#FCD34D',
+  },
+  dailyQueueBannerField: {
+    backgroundColor: '#F5F3FF',
+    borderColor: '#DDD6FE',
+  },
+  dailyQueueBannerNeutral: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#CBD5E1',
+  },
+  dailyQueueTextWrap: {
+    gap: 6,
+  },
+  dailyQueueTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dailyQueueTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  dailyQueueDetail: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#334155',
+  },
+  dailyQueueButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  dailyQueueButtonCall: {
+    backgroundColor: '#047857',
+  },
+  dailyQueueButtonReview: {
+    backgroundColor: '#B45309',
+  },
+  dailyQueueButtonField: {
+    backgroundColor: '#6D28D9',
+  },
+  dailyQueueButtonNeutral: {
+    backgroundColor: '#475569',
+  },
+  dailyQueueButtonText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '800',
   },
   shortlistFootnote: {
     fontSize: 12,
