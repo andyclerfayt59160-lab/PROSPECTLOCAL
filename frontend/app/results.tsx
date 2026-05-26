@@ -1049,95 +1049,6 @@ export default function ResultsScreen() {
     );
   }, [shortlistScopeBusinesses]);
 
-  const dailyQueueState = useMemo(() => {
-    if (sourceKind !== 'web') return null;
-
-    if (shortlistReadinessCounts.ready_call > 0) {
-      return {
-        label: 'File du jour prete',
-        detail: `${shortlistReadinessCounts.ready_call} lead(s) nouveau(x) sont prets a appeler tout de suite.`,
-        action: () => {
-          setViewMode('verified');
-          setActiveFilter('ready_call');
-          setOnlyNewLeads(true);
-          setGroupByLocality(false);
-          setListFocusMode(true);
-        },
-        actionLabel: 'Ouvrir les appels du jour',
-        style: styles.dailyQueueBannerCall,
-        iconColor: '#047857',
-        buttonStyle: styles.dailyQueueButtonCall,
-      };
-    }
-
-    if (shortlistNeedsAuditCount > 0) {
-      return {
-        label: 'File a auditer',
-        detail: `${shortlistNeedsAuditCount} lead(s) nouveau(x) demandent encore une verification Google, PagesJaunes ou legale avant relance.`,
-        action: () => {
-          setViewMode('verified');
-          setActiveFilter('needs_audit');
-          setOnlyNewLeads(true);
-          setGroupByLocality(false);
-          setListFocusMode(true);
-        },
-        actionLabel: 'Ouvrir les audits du jour',
-        style: styles.dailyQueueBannerAudit,
-        iconColor: '#0F766E',
-        buttonStyle: styles.dailyQueueButtonAudit,
-      };
-    }
-
-    if (shortlistReadinessCounts.review > 0) {
-      return {
-        label: 'File a recouper',
-        detail: `${shortlistReadinessCounts.review} lead(s) nouveau(x) meritent une verification rapide avant relance.`,
-        action: () => {
-          setViewMode('verified');
-          setActiveFilter('review');
-          setOnlyNewLeads(true);
-          setGroupByLocality(false);
-          setListFocusMode(true);
-        },
-        actionLabel: 'Ouvrir les recoupements',
-        style: styles.dailyQueueBannerReview,
-        iconColor: '#B45309',
-        buttonStyle: styles.dailyQueueButtonReview,
-      };
-    }
-
-    if (shortlistReadinessCounts.field > 0) {
-      return {
-        label: 'File terrain',
-        detail: `${shortlistReadinessCounts.field} lead(s) nouveau(x) demandent plutot un passage terrain.`,
-        action: () => {
-          setViewMode('visite_terrain');
-          setActiveFilter('field');
-          setOnlyNewLeads(true);
-          setGroupByLocality(false);
-          setListFocusMode(true);
-        },
-        actionLabel: 'Ouvrir le terrain du jour',
-        style: styles.dailyQueueBannerField,
-        iconColor: '#6D28D9',
-        buttonStyle: styles.dailyQueueButtonField,
-      };
-    }
-
-    return {
-      label: 'Aucun lead chaud neuf',
-      detail: 'Le scan ne sort pas encore de nouveau lead immediatement actionnable dans ce scope.',
-      action: () => {
-        setOnlyNewLeads(false);
-        setActiveFilter('all');
-      },
-      actionLabel: 'Revoir aussi les deja connus',
-      style: styles.dailyQueueBannerNeutral,
-      iconColor: '#475569',
-      buttonStyle: styles.dailyQueueButtonNeutral,
-    };
-  }, [shortlistNeedsAuditCount, shortlistReadinessCounts, sourceKind]);
-
   useEffect(() => {
     if (selectedLocality === 'all') return;
     const stillAvailable = localityOptions.some((option) => option.key === selectedLocality);
@@ -1344,7 +1255,7 @@ export default function ResultsScreen() {
           : loadedUnverified.length > 0
             ? 'unverified'
             : loadedVisiteTerrain.length > 0
-              ? 'terrain'
+              ? 'visite_terrain'
               : 'verified';
 
       if (scanKey && autoSelectedViewScanRef.current !== scanKey) {
@@ -1784,6 +1695,95 @@ export default function ResultsScreen() {
     () => shortlistScopeBusinesses.filter((business) => needsQuickAudit(business)).length,
     [shortlistScopeBusinesses]
   );
+
+  const dailyQueueState = useMemo(() => {
+    if (sourceKind !== 'web') return null;
+
+    if (shortlistReadinessCounts.ready_call > 0) {
+      return {
+        label: 'File du jour prete',
+        detail: `${shortlistReadinessCounts.ready_call} lead(s) nouveau(x) sont prets a appeler tout de suite.`,
+        action: () => {
+          setViewMode('verified');
+          setActiveFilter('ready_call');
+          setOnlyNewLeads(true);
+          setGroupByLocality(false);
+          setListFocusMode(true);
+        },
+        actionLabel: 'Ouvrir les appels du jour',
+        style: styles.dailyQueueBannerCall,
+        iconColor: '#047857',
+        buttonStyle: styles.dailyQueueButtonCall,
+      };
+    }
+
+    if (shortlistNeedsAuditCount > 0) {
+      return {
+        label: 'File a auditer',
+        detail: `${shortlistNeedsAuditCount} lead(s) nouveau(x) demandent encore une verification Google, PagesJaunes ou legale avant relance.`,
+        action: () => {
+          setViewMode('verified');
+          setActiveFilter('needs_audit');
+          setOnlyNewLeads(true);
+          setGroupByLocality(false);
+          setListFocusMode(true);
+        },
+        actionLabel: 'Ouvrir les audits du jour',
+        style: styles.dailyQueueBannerAudit,
+        iconColor: '#0F766E',
+        buttonStyle: styles.dailyQueueButtonAudit,
+      };
+    }
+
+    if (shortlistReadinessCounts.review > 0) {
+      return {
+        label: 'File a recouper',
+        detail: `${shortlistReadinessCounts.review} lead(s) nouveau(x) meritent une verification rapide avant relance.`,
+        action: () => {
+          setViewMode('verified');
+          setActiveFilter('review');
+          setOnlyNewLeads(true);
+          setGroupByLocality(false);
+          setListFocusMode(true);
+        },
+        actionLabel: 'Ouvrir les recoupements',
+        style: styles.dailyQueueBannerReview,
+        iconColor: '#B45309',
+        buttonStyle: styles.dailyQueueButtonReview,
+      };
+    }
+
+    if (shortlistReadinessCounts.field > 0) {
+      return {
+        label: 'File terrain',
+        detail: `${shortlistReadinessCounts.field} lead(s) nouveau(x) demandent plutot un passage terrain.`,
+        action: () => {
+          setViewMode('visite_terrain');
+          setActiveFilter('field');
+          setOnlyNewLeads(true);
+          setGroupByLocality(false);
+          setListFocusMode(true);
+        },
+        actionLabel: 'Ouvrir le terrain du jour',
+        style: styles.dailyQueueBannerField,
+        iconColor: '#6D28D9',
+        buttonStyle: styles.dailyQueueButtonField,
+      };
+    }
+
+    return {
+      label: 'Aucun lead chaud neuf',
+      detail: 'Le scan ne sort pas encore de nouveau lead immediatement actionnable dans ce scope.',
+      action: () => {
+        setOnlyNewLeads(false);
+        setActiveFilter('all');
+      },
+      actionLabel: 'Revoir aussi les deja connus',
+      style: styles.dailyQueueBannerNeutral,
+      iconColor: '#475569',
+      buttonStyle: styles.dailyQueueButtonNeutral,
+    };
+  }, [shortlistNeedsAuditCount, shortlistReadinessCounts, sourceKind]);
 
   const getCreationBadge = (dateCreation?: string) => {
     if (!dateCreation) {
