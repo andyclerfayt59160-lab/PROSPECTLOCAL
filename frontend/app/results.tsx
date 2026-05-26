@@ -540,6 +540,7 @@ export default function ResultsScreen() {
   const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [listFocusMode, setListFocusMode] = useState(true);
   const [auditingTopLeads, setAuditingTopLeads] = useState(false);
+  const [auditingBusinessIds, setAuditingBusinessIds] = useState<string[]>([]);
   const [batchAuditSummary, setBatchAuditSummary] = useState('');
   const [hideAvoidLeads, setHideAvoidLeads] = useState(true);
   const [onlyNewLeads, setOnlyNewLeads] = useState(true);
@@ -1611,6 +1612,39 @@ export default function ResultsScreen() {
     }
   };
 
+  const handleAuditBusiness = async (item: Business) => {
+    if (auditingBusinessIds.includes(item.id)) {
+      return;
+    }
+
+    setAuditingBusinessIds((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
+    try {
+      const response = await axios.post(
+        `${API_URL}/api/businesses/${item.id}/digital-visibility-audit`,
+        null,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      const updatedBusiness = response.data?.business;
+      if (updatedBusiness?.id) {
+        patchBusinessInLists(item.id, updatedBusiness);
+      }
+      await loadBusinesses();
+      showToast(
+        response.data?.summary || response.data?.message || `${item.name} a ete audite.`,
+        'success'
+      );
+    } catch (error: any) {
+      console.error('Error auditing business visibility:', error);
+      showToast(
+        error?.response?.data?.detail || "Impossible de lancer l'audit de ce lead.",
+        'error'
+      );
+    } finally {
+      setAuditingBusinessIds((prev) => prev.filter((businessId) => businessId !== item.id));
+    }
+  };
+
   const getPJState = (item: Business): PJState => {
     if (item.pj_manually_set) {
       return item.has_pagesjaunes ? 'present' : 'absent';
@@ -1694,6 +1728,28 @@ export default function ResultsScreen() {
     return { label: 'Legal non audite', color: '#475569', bg: '#E2E8F0', icon: 'help-circle-outline' as const };
   };
 
+  const needsQuickAudit = (item: Business): boolean => {
+    if (item.client_status === 'client' || item.interest_status === 'not_interested') {
+      return false;
+    }
+
+    const legalState = getLegalState(item);
+    if (legalState === 'closed') {
+      return false;
+    }
+
+    const hasAuditSnapshot = !!item.visibility_audited_at || !!item.legal_presence_audited_at;
+    if (!hasAuditSnapshot) {
+      return true;
+    }
+
+    if (legalState !== 'confirmed') {
+      return true;
+    }
+
+    return getGoogleState(item) === 'unknown' || getPJState(item) === 'unknown';
+  };
+
   const getCreationBadge = (dateCreation?: string) => {
     if (!dateCreation) {
       return null;
@@ -1748,6 +1804,9 @@ export default function ResultsScreen() {
       const salesReadiness = item.sales_readiness_status ? SALES_READINESS_META[item.sales_readiness_status] : null;
       const crmTracked = item.crm_status === 'in_crm';
       const notInterested = item.interest_status === 'not_interested';
+      const needsAudit = needsQuickAudit(item);
+      const isAuditingLead = auditingBusinessIds.includes(item.id);
+      const hasAuditSnapshot = !!item.visibility_audited_at || !!item.legal_presence_audited_at;
       const canSendToTerrain = viewMode !== 'visite_terrain' && item.sales_readiness_status !== 'field';
     
     return (
@@ -1944,6 +2003,31 @@ export default function ResultsScreen() {
                   {notInterested ? 'Ecarte' : 'Ecarter'}
                 </Text>
               </TouchableOpacity>
+
+              {needsAudit ? (
+                <TouchableOpacity
+                  style={[
+                    styles.quickActionButton,
+                    styles.quickActionButtonAudit,
+                    isAuditingLead && styles.quickActionButtonAuditActive,
+                  ]}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    handleAuditBusiness(item);
+                  }}
+                  disabled={isAuditingLead}
+                  activeOpacity={0.85}
+                >
+                  {isAuditingLead ? (
+                    <ActivityIndicator size="small" color="#0F766E" />
+                  ) : (
+                    <Ionicons name="shield-checkmark-outline" size={13} color="#0F766E" />
+                  )}
+                  <Text style={styles.quickActionButtonAuditText}>
+                    {isAuditingLead ? 'Audit...' : hasAuditSnapshot ? 'Reauditer' : 'Auditer'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
 
               {canSendToTerrain ? (
                 <TouchableOpacity
@@ -3147,6 +3231,18 @@ const styles = StyleSheet.create({
   },
   quickActionButtonSkipTextActive: {
     color: '#FFFFFF',
+  },
+  quickActionButtonAudit: {
+    backgroundColor: '#ECFEFF',
+    borderColor: '#A5F3FC',
+  },
+  quickActionButtonAuditActive: {
+    opacity: 0.75,
+  },
+  quickActionButtonAuditText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F766E',
   },
   quickActionButtonField: {
     backgroundColor: '#F5F3FF',
