@@ -193,7 +193,11 @@ export default function PortailAuditSitesScreen() {
         <View style={styles.quickActions}>
           <TouchableOpacity
             style={[styles.primaryAction, !readiness.auditReady && styles.primaryActionMuted]}
-            onPress={() => router.push('/audit-site-externe?portal=1')}
+            onPress={() =>
+              readiness.auditReady
+                ? router.push('/audit-site-externe?portal=1')
+                : router.push('/settings?onboarding=1&portal=audit')
+            }
           >
             <Ionicons name="rocket-outline" size={18} color="#FFFFFF" />
             <Text style={styles.primaryActionText}>
