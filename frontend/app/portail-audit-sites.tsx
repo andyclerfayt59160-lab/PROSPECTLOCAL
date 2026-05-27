@@ -133,7 +133,7 @@ export default function PortailAuditSitesScreen() {
       serperReady,
       pappersReady,
       onboardingReady,
-      auditReady: googleReady && serperReady,
+      auditReady: googleReady,
     };
   }, [apiStatus]);
 
@@ -177,15 +177,11 @@ export default function PortailAuditSitesScreen() {
           <View style={styles.heroChecklist}>
             <View style={styles.heroChecklistItem}>
               <Ionicons name={readiness.googleReady ? 'checkmark-circle' : 'ellipse-outline'} size={16} color={readiness.googleReady ? '#047857' : '#94A3B8'} />
-              <Text style={styles.heroChecklistText}>Google Places {readiness.googleReady ? 'configure' : 'a configurer'}</Text>
+              <Text style={styles.heroChecklistText}>Google Places {readiness.googleReady ? 'configure (requis)' : 'a configurer (requis)'}</Text>
             </View>
             <View style={styles.heroChecklistItem}>
               <Ionicons name={readiness.serperReady ? 'checkmark-circle' : 'ellipse-outline'} size={16} color={readiness.serperReady ? '#047857' : '#94A3B8'} />
-              <Text style={styles.heroChecklistText}>Serper {readiness.serperReady ? 'configure' : 'a configurer'}</Text>
-            </View>
-            <View style={styles.heroChecklistItem}>
-              <Ionicons name={readiness.pappersReady ? 'checkmark-circle' : 'ellipse-outline'} size={16} color={readiness.pappersReady ? '#047857' : '#94A3B8'} />
-              <Text style={styles.heroChecklistText}>Pappers {readiness.pappersReady ? 'configuree' : 'optionnelle'}</Text>
+              <Text style={styles.heroChecklistText}>Serper {readiness.serperReady ? 'configuree (recommandee)' : 'optionnelle mais recommandee'}</Text>
             </View>
           </View>
         </View>
@@ -212,7 +208,7 @@ export default function PortailAuditSitesScreen() {
             >
               <Ionicons name="key-outline" size={18} color="#4F46E5" />
               <Text style={styles.secondaryActionTitle}>Onboarding et API</Text>
-              <Text style={styles.secondaryActionText}>Renseigner Google, Serper et Pappers</Text>
+              <Text style={styles.secondaryActionText}>Renseigner Google (requis) et Serper si souhaite</Text>
             </TouchableOpacity>
 
             <TouchableOpacity

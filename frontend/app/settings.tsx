@@ -157,7 +157,9 @@ export default function SettingsScreen() {
     databaseTarget: '',
     databaseName: '',
   });
-  const requiredKeysReady = keyStatus.has_google_api_key && keyStatus.has_serper_api_key;
+  const requiredKeysReady = portalMode
+    ? keyStatus.has_google_api_key
+    : keyStatus.has_google_api_key && keyStatus.has_serper_api_key;
 
   useEffect(() => {
     loadApiKeys();
@@ -360,7 +362,9 @@ export default function SettingsScreen() {
 
   const handleCompleteOnboarding = async () => {
     if (!requiredKeysReady) {
-      const message = 'Google Places et Serper.dev sont requis avant de terminer la configuration.';
+      const message = portalMode
+        ? "Google Places est requis avant de terminer l'activation du portail audit. Serper reste recommandee, mais non obligatoire."
+        : 'Google Places et Serper.dev sont requis avant de terminer la configuration.';
       if (Platform.OS === 'web') {
         window.alert(message);
       } else {
@@ -549,17 +553,19 @@ export default function SettingsScreen() {
             </View>
             <Text style={styles.onboardingHeroText}>
               {portalMode
-                ? "Chaque collègue configure ici ses propres clés API pour lancer des audits de sites externes sans accéder au reste de l'application."
+                ? "Chaque collègue configure ici ses propres clés API pour lancer des audits de sites externes sans accéder au reste de l'application. Pour ce portail, seule la clé Google est obligatoire."
                 : 'Chaque compte doit renseigner ses propres cles API. Aucune cle personnelle n est partagee avec les autres utilisateurs.'}
             </Text>
             <View style={styles.onboardingSteps}>
               <Text style={styles.onboardingStep}>1. Ouvre Google Places et recupere ta cle Google.</Text>
-              <Text style={styles.onboardingStep}>2. Ouvre Serper.dev et recupere ta cle Serper.</Text>
               <Text style={styles.onboardingStep}>
-                3. {portalMode ? 'Pappers reste optionnelle pour enrichir certains contrôles.' : 'Pappers est optionnelle, utile pour le scan Pappers.'}
+                2. {portalMode ? 'Serper.dev est recommandee pour elargir la couverture, mais elle n est pas obligatoire.' : 'Ouvre Serper.dev et recupere ta cle Serper.'}
               </Text>
               <Text style={styles.onboardingStep}>
-                4. {portalMode ? "Enregistre les clés puis termine l'activation du portail." : 'Enregistre les clés puis termine l’activation.'}
+                3. {portalMode ? 'Pappers n est pas demandee pour ce portail audit sites.' : 'Pappers est optionnelle, utile pour le scan Pappers.'}
+              </Text>
+              <Text style={styles.onboardingStep}>
+                4. {portalMode ? "Enregistre tes clés puis termine l'activation du portail." : 'Enregistre les clés puis termine l’activation.'}
               </Text>
             </View>
             <View style={styles.onboardingQuickLinks}>
@@ -577,13 +583,15 @@ export default function SettingsScreen() {
                 <Ionicons name="search" size={16} color="#4F46E5" />
                 <Text style={styles.onboardingQuickBtnText}>Serper</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.onboardingQuickBtn}
-                onPress={() => Linking.openURL(API_INFO.pappers.link)}
-              >
-                <Ionicons name="document-text" size={16} color="#4F46E5" />
-                <Text style={styles.onboardingQuickBtnText}>Pappers</Text>
-              </TouchableOpacity>
+              {!portalMode && (
+                <TouchableOpacity
+                  style={styles.onboardingQuickBtn}
+                  onPress={() => Linking.openURL(API_INFO.pappers.link)}
+                >
+                  <Ionicons name="document-text" size={16} color="#4F46E5" />
+                  <Text style={styles.onboardingQuickBtnText}>Pappers</Text>
+                </TouchableOpacity>
+              )}
             </View>
             <TouchableOpacity
               style={[
@@ -599,7 +607,7 @@ export default function SettingsScreen() {
                 color="#FFF"
               />
               <Text style={styles.onboardingFinishBtnText}>
-                {requiredKeysReady ? 'Terminer l’activation' : 'Google + Serper requis'}
+                {requiredKeysReady ? 'Terminer l’activation' : portalMode ? 'Google requis' : 'Google + Serper requis'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -611,8 +619,9 @@ export default function SettingsScreen() {
           <View style={styles.infoBannerText}>
             <Text style={styles.infoBannerTitle}>🔑 Vos clés API personnelles</Text>
             <Text style={styles.infoBannerDesc}>
-              Configurez vos propres clés pour utiliser vos crédits API. 
-              Chaque service propose une offre gratuite généreuse !
+              {portalMode
+                ? 'Pour ce portail, seule la clé Google est obligatoire. Serper reste recommandee pour élargir les résultats. Pappers n est pas necessaire ici.'
+                : 'Configurez vos propres clés pour utiliser vos crédits API. Chaque service propose une offre gratuite généreuse !'}
             </Text>
           </View>
         </View>
@@ -621,7 +630,7 @@ export default function SettingsScreen() {
         <View style={styles.sectionsContainer}>
           {renderApiSection('google', 'google_api_key', keyStatus.has_google_api_key)}
           {renderApiSection('serper', 'serper_api_key', keyStatus.has_serper_api_key)}
-          {renderApiSection('pappers', 'pappers_api_key', keyStatus.has_pappers_api_key)}
+          {!portalMode && renderApiSection('pappers', 'pappers_api_key', keyStatus.has_pappers_api_key)}
         </View>
 
         {/* Save Button */}
@@ -926,12 +935,14 @@ export default function SettingsScreen() {
               {keyStatus.has_serper_api_key ? '✅ Configurée' : '⚠️ Non configurée'}
             </Text>
           </View>
-          <View style={styles.summaryRow}>
+          {!portalMode && (
+            <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Pappers (optionnel)</Text>
             <Text style={keyStatus.has_pappers_api_key ? styles.summaryValueOk : styles.summaryValueNo}>
               {keyStatus.has_pappers_api_key ? '✅ Configurée' : '➖ Non configurée'}
             </Text>
-          </View>
+            </View>
+          )}
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Mode email</Text>
             <Text style={runtimeStatus.emailDeliveryReady ? styles.summaryValueOk : styles.summaryValueNo}>
