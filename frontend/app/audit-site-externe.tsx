@@ -12,6 +12,7 @@ import {
   Linking,
   Platform,
 } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
@@ -131,6 +132,10 @@ const formatDomainSelection = (selectedDomains: string[]) => {
 };
 
 export default function AuditSiteExterneScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ portal?: string; auditId?: string }>();
+  const portalMode = params.portal === '1';
+  const requestedAuditId = typeof params.auditId === 'string' ? params.auditId : '';
   const [location, setLocation] = useState('');
   const [radiusKm, setRadiusKm] = useState('20');
   const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
@@ -157,6 +162,11 @@ export default function AuditSiteExterneScreen() {
   useEffect(() => {
     loadAuditHistory();
   }, []);
+
+  useEffect(() => {
+    if (!requestedAuditId) return;
+    loadAuditDetail(requestedAuditId, { offset: 0, append: false, silent: true });
+  }, [requestedAuditId]);
 
   useEffect(() => {
     const searchCities = async () => {
@@ -501,6 +511,12 @@ export default function AuditSiteExterneScreen() {
         <Text style={styles.heroSubtitle}>
           Fonction separee du scan Tout Internet pour identifier les pros equipes d'un site concurrent, sur une zone et un domaine d'activite donnes.
         </Text>
+        {portalMode ? (
+          <TouchableOpacity style={styles.portalBackButton} onPress={() => router.replace('/portail-audit-sites')}>
+            <Ionicons name="arrow-back-outline" size={16} color="#4F46E5" />
+            <Text style={styles.portalBackButtonText}>Retour au portail audit</Text>
+          </TouchableOpacity>
+        ) : null}
         <View style={styles.heroCallout}>
           <Ionicons name="shield-checkmark-outline" size={18} color="#4F46E5" />
           <Text style={styles.heroCalloutText}>
@@ -819,6 +835,21 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 14,
     alignItems: 'flex-start',
+  },
+  portalBackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#EEF2FF',
+  },
+  portalBackButtonText: {
+    color: '#4F46E5',
+    fontSize: 12,
+    fontWeight: '700',
   },
   heroCalloutText: {
     flex: 1,

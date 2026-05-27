@@ -132,13 +132,19 @@ async def login(request: Request):
     access_token = create_access_token(data={
         "sub": user["id"],
         "email": user["email"],
-        "role": user["role"]
+        "role": user["role"],
+        "access_scope": user.get("access_scope", "full"),
     })
     
     return Token(
         access_token=access_token,
         token_type="bearer",
-        user={"id": user["id"], "email": user["email"], "role": user["role"]}
+        user={
+            "id": user["id"],
+            "email": user["email"],
+            "role": user["role"],
+            "access_scope": user.get("access_scope", "full"),
+        }
     )
 
 
@@ -149,6 +155,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     
     user = await db.users.find_one({"id": current_user["sub"]}, {"_id": 0, "password_hash": 0})
     if user:
+        user["access_scope"] = user.get("access_scope", "full")
         user["has_google_api_key"] = bool(user.get("google_api_key"))
         user["has_serper_api_key"] = bool(user.get("serper_api_key"))
         user["has_pappers_api_key"] = bool(user.get("pappers_api_key"))

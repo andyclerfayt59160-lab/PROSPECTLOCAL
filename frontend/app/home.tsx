@@ -19,7 +19,13 @@ import * as Clipboard from 'expo-clipboard';
 import { useScan } from '../context/ScanContext';
 
 import { API_URL } from '../utils/api';
-import { clearStoredSession, handleAuthError, redirectToLogin } from '../utils/authHelpers';
+import {
+  AUDIT_PORTAL_HOME_ROUTE,
+  clearStoredSession,
+  handleAuthError,
+  isExternalAuditOnlyUser,
+  redirectToLogin,
+} from '../utils/authHelpers';
 
 interface DailyCockpitStats {
   aTraiter: number;
@@ -245,6 +251,10 @@ export default function HomeScreen() {
     if (storedUserValue) {
       try {
         const parsedUser = JSON.parse(storedUserValue);
+        if (isExternalAuditOnlyUser(parsedUser)) {
+          router.replace(AUDIT_PORTAL_HOME_ROUTE);
+          return;
+        }
         const nextRole = parsedUser?.role === 'admin' ? 'admin' : 'user';
         setUserRole(nextRole);
       } catch (error) {

@@ -18,7 +18,7 @@ import { ProspectLocalLogo } from '../components/ProspectLocalLogo';
 import { useToast } from '../components/Toast';
 
 import { API_URL } from '../utils/api';
-import { validateStoredSession } from '../utils/authHelpers';
+import { getDefaultRouteForUser, persistAuthenticatedUser, validateStoredSession } from '../utils/authHelpers';
 const REMEMBERED_EMAIL_KEY = 'rememberedEmail';
 
 function AuthFormShell({
@@ -61,8 +61,9 @@ export default function LoginScreen() {
           setEmail(emailValue);
         }
 
-        if (tokenValue && (await validateStoredSession())) {
-          router.replace('/home');
+        const sessionUser = tokenValue ? await validateStoredSession() : null;
+        if (sessionUser) {
+          router.replace(getDefaultRouteForUser(sessionUser));
         }
       } catch (error) {
         console.error('Login restore error:', error);
@@ -113,14 +114,10 @@ export default function LoginScreen() {
       });
 
       if (isLogin && response.data.access_token) {
-        await AsyncStorage.multiSet([
-          ['token', response.data.access_token],
-          ['user', JSON.stringify(response.data.user)],
-          [REMEMBERED_EMAIL_KEY, email],
-          ['userEmail', response.data.user?.email || email],
-          ['userName', response.data.user?.name || response.data.user?.email || email],
-        ]);
-        router.replace('/home');
+        await AsyncStorage.setItem('token', response.data.access_token);
+        await AsyncStorage.setItem(REMEMBERED_EMAIL_KEY, email);
+        await persistAuthenticatedUser(response.data.user, email);
+        router.replace(getDefaultRouteForUser(response.data.user));
         return;
       }
 

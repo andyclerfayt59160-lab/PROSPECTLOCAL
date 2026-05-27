@@ -8316,6 +8316,7 @@ async def get_all_users(current_user: dict = Depends(get_current_admin)):
     for user in users:
         user.pop("_id", None)
         user.pop("password_hash", None)
+        user["access_scope"] = user.get("access_scope", "full")
         user["has_google_api_key"] = bool(user.get("google_api_key"))
         user["has_serper_api_key"] = bool(user.get("serper_api_key"))
         user["has_pappers_api_key"] = bool(user.get("pappers_api_key"))
@@ -8428,7 +8429,8 @@ async def create_user(
     new_user = User(
         email=user_data.email,
         password_hash=get_password_hash(user_data.password),
-        role=user_data.role
+        role=user_data.role,
+        access_scope=getattr(user_data, "access_scope", "full"),
     )
     
     await db.users.insert_one(new_user.dict())
@@ -8439,6 +8441,7 @@ async def create_user(
             "id": new_user.id,
             "email": new_user.email,
             "role": new_user.role,
+            "access_scope": new_user.access_scope,
             "created_at": new_user.created_at.isoformat()
         }
     }
@@ -8483,6 +8486,10 @@ async def update_user(
     if "role" in update_data:
         if update_data["role"] in ["admin", "user"]:
             update_fields["role"] = update_data["role"]
+
+    if "access_scope" in update_data:
+        if update_data["access_scope"] in ["full", "external_site_audit_only"]:
+            update_fields["access_scope"] = update_data["access_scope"]
     
     if "password" in update_data and update_data["password"]:
         update_fields["password_hash"] = get_password_hash(update_data["password"])

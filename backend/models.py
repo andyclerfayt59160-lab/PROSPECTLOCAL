@@ -8,6 +8,10 @@ class Role(str, Enum):
     ADMIN = "admin"
     USER = "user"
 
+class AccessScope(str, Enum):
+    FULL = "full"
+    EXTERNAL_SITE_AUDIT_ONLY = "external_site_audit_only"
+
 class ScanStatus(str, Enum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -92,12 +96,14 @@ class User(BaseModel):
     email: EmailStr
     password_hash: str
     role: Role = Role.USER
+    access_scope: AccessScope = AccessScope.FULL
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
     role: Role = Role.USER
+    access_scope: AccessScope = AccessScope.FULL
 
 class UserLogin(BaseModel):
     email: EmailStr

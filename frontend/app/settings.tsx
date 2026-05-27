@@ -19,7 +19,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ProspectLocalLogo } from '../components/ProspectLocalLogo';
 
 import { API_URL } from '../utils/api';
-import { clearStoredSession, handleAuthError, redirectToLogin } from '../utils/authHelpers';
+import {
+  AUDIT_PORTAL_HOME_ROUTE,
+  getDefaultRouteForUser,
+  getStoredUserProfile,
+  handleAuthError,
+  redirectToLogin,
+} from '../utils/authHelpers';
 
 // Informations sur les API avec les offres gratuites
 const API_INFO = {
@@ -78,8 +84,9 @@ const API_INFO = {
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ onboarding?: string }>();
+  const params = useLocalSearchParams<{ onboarding?: string; portal?: string }>();
   const onboardingMode = params.onboarding === '1';
+  const portalMode = params.portal === 'audit';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [apiKeys, setApiKeys] = useState({
@@ -370,7 +377,8 @@ export default function SettingsScreen() {
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      router.replace('/home');
+      const storedUser = await getStoredUserProfile();
+      router.replace(portalMode ? AUDIT_PORTAL_HOME_ROUTE : getDefaultRouteForUser(storedUser));
     } catch (error) {
       console.error('Error completing onboarding:', error);
       const wasAuthError = await handleAuthError(error, true, router);
@@ -517,11 +525,17 @@ export default function SettingsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.replace('/home')} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={async () => {
+            const storedUser = await getStoredUserProfile();
+            router.replace(portalMode ? AUDIT_PORTAL_HOME_ROUTE : getDefaultRouteForUser(storedUser));
+          }}
+          style={styles.backButton}
+        >
           <Ionicons name="arrow-back" size={24} color="#1C1C1E" />
         </TouchableOpacity>
         <ProspectLocalLogo size={36} variant="icon" />
-        <Text style={styles.headerTitle}>Paramètres</Text>
+        <Text style={styles.headerTitle}>{portalMode ? 'Onboarding audit sites' : 'Paramètres'}</Text>
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
@@ -529,16 +543,24 @@ export default function SettingsScreen() {
           <View style={styles.onboardingHero}>
             <View style={styles.onboardingHeroHeader}>
               <Ionicons name="shield-checkmark" size={24} color="#4F46E5" />
-              <Text style={styles.onboardingHeroTitle}>Première configuration sécurisée</Text>
+              <Text style={styles.onboardingHeroTitle}>
+                {portalMode ? 'Première activation du portail audit' : 'Première configuration sécurisée'}
+              </Text>
             </View>
             <Text style={styles.onboardingHeroText}>
-              Chaque compte doit renseigner ses propres cles API. Aucune cle personnelle n est partagee avec les autres utilisateurs.
+              {portalMode
+                ? "Chaque collègue configure ici ses propres clés API pour lancer des audits de sites externes sans accéder au reste de l'application."
+                : 'Chaque compte doit renseigner ses propres cles API. Aucune cle personnelle n est partagee avec les autres utilisateurs.'}
             </Text>
             <View style={styles.onboardingSteps}>
               <Text style={styles.onboardingStep}>1. Ouvre Google Places et recupere ta cle Google.</Text>
               <Text style={styles.onboardingStep}>2. Ouvre Serper.dev et recupere ta cle Serper.</Text>
-              <Text style={styles.onboardingStep}>3. Pappers est optionnelle, utile pour le scan Pappers.</Text>
-              <Text style={styles.onboardingStep}>4. Enregistre les clés puis termine l’activation.</Text>
+              <Text style={styles.onboardingStep}>
+                3. {portalMode ? 'Pappers reste optionnelle pour enrichir certains contrôles.' : 'Pappers est optionnelle, utile pour le scan Pappers.'}
+              </Text>
+              <Text style={styles.onboardingStep}>
+                4. {portalMode ? "Enregistre les clés puis termine l'activation du portail." : 'Enregistre les clés puis termine l’activation.'}
+              </Text>
             </View>
             <View style={styles.onboardingQuickLinks}>
               <TouchableOpacity

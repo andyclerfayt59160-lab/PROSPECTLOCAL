@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 
-import { validateStoredSession } from '../utils/authHelpers';
+import { getDefaultRouteForUser, validateStoredSession } from '../utils/authHelpers';
 
 export default function Index() {
   const router = useRouter();
@@ -12,9 +12,9 @@ export default function Index() {
   }, []);
 
   const checkAuth = async () => {
-    const hasValidSession = await validateStoredSession(router);
-    if (hasValidSession) {
-      router.replace('/home');
+    const sessionUser = await validateStoredSession(router);
+    if (sessionUser) {
+      router.replace(getDefaultRouteForUser(sessionUser));
     }
   };
 

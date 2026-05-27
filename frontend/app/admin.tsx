@@ -25,6 +25,7 @@ interface User {
   id: string;
   email: string;
   role: 'admin' | 'user';
+  access_scope?: 'full' | 'external_site_audit_only';
   created_at: string;
   is_active?: boolean;
   is_approved?: boolean;
@@ -66,7 +67,17 @@ interface ProvisionedCredentials {
   email: string;
   password: string;
   context: string;
+  portalLink?: string;
 }
+
+const EXTERNAL_AUDIT_PORTAL_PATH = '/portail-audit-sites-login';
+
+const buildPortalLink = () => {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return `${window.location.origin}${EXTERNAL_AUDIT_PORTAL_PATH}`;
+  }
+  return EXTERNAL_AUDIT_PORTAL_PATH;
+};
 
 // Générateur de mot de passe sécurisé
 const generateSecurePassword = (length: number = 12): string => {
@@ -90,13 +101,15 @@ export default function AdminScreen() {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<'user' | 'admin'>('user');
+  const [newUserAccessScope, setNewUserAccessScope] = useState<'full' | 'external_site_audit_only'>('full');
   const [editPassword, setEditPassword] = useState('');
   const [editRole, setEditRole] = useState<'user' | 'admin'>('user');
+  const [editAccessScope, setEditAccessScope] = useState<'full' | 'external_site_audit_only'>('full');
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [activeTab, setActiveTab] = useState<'users' | 'pending'>('users');
   const [searchTerm, setSearchTerm] = useState('');
-  const [userFilter, setUserFilter] = useState<'all' | 'admins' | 'internet_ready' | 'pappers_ready' | 'needs_keys' | 'disabled' | 'onboarding_pending'>('all');
+  const [userFilter, setUserFilter] = useState<'all' | 'admins' | 'internet_ready' | 'pappers_ready' | 'needs_keys' | 'disabled' | 'onboarding_pending' | 'audit_portal'>('all');
   const [userSort, setUserSort] = useState<UserSort>('needs_attention');
   const [editOnboardingCompleted, setEditOnboardingCompleted] = useState(false);
   const [editClearApiKeys, setEditClearApiKeys] = useState(false);
@@ -161,7 +174,8 @@ export default function AdminScreen() {
         {
           email: newUserEmail,
           password: newUserPassword,
-          role: newUserRole,
+          role: newUserAccessScope === 'external_site_audit_only' ? 'user' : newUserRole,
+          access_scope: newUserAccessScope,
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -176,10 +190,12 @@ export default function AdminScreen() {
       setNewUserEmail('');
       setNewUserPassword('');
       setNewUserRole('user');
+      setNewUserAccessScope('full');
       setLastProvisionedCredentials({
         email: newUserEmail,
         password: newUserPassword,
-        context: 'Compte cree',
+        context: newUserAccessScope === 'external_site_audit_only' ? 'Compte portail audit cree' : 'Compte cree',
+        portalLink: newUserAccessScope === 'external_site_audit_only' ? buildPortalLink() : undefined,
       });
       loadData();
     } catch (error: any) {
@@ -223,6 +239,7 @@ export default function AdminScreen() {
     setEditingUser(user);
     setEditPassword('');
     setEditRole(user.role);
+    setEditAccessScope(user.access_scope === 'external_site_audit_only' ? 'external_site_audit_only' : 'full');
     setEditOnboardingCompleted(!!user.onboarding_completed);
     setEditClearApiKeys(false);
     setShowEditModal(true);
@@ -354,7 +371,8 @@ export default function AdminScreen() {
     try {
       const token = await AsyncStorage.getItem('token');
       const updateData: any = {
-        role: editRole,
+        role: editAccessScope === 'external_site_audit_only' ? 'user' : editRole,
+        access_scope: editAccessScope,
         onboarding_completed: editClearApiKeys ? false : editOnboardingCompleted,
       };
       
@@ -377,7 +395,8 @@ export default function AdminScreen() {
         u.id === editingUser.id
           ? {
               ...u,
-              role: editRole,
+              role: editAccessScope === 'external_site_audit_only' ? 'user' : editRole,
+              access_scope: editAccessScope,
               onboarding_completed: editClearApiKeys ? false : editOnboardingCompleted,
               has_google_api_key: editClearApiKeys ? false : u.has_google_api_key,
               has_serper_api_key: editClearApiKeys ? false : u.has_serper_api_key,
@@ -391,7 +410,8 @@ export default function AdminScreen() {
         setLastProvisionedCredentials({
           email: editingUser.email,
           password: editPassword.trim(),
-          context: 'Mot de passe reinitialise',
+          context: editAccessScope === 'external_site_audit_only' ? 'Acces portail audit reinitialise' : 'Mot de passe reinitialise',
+          portalLink: editAccessScope === 'external_site_audit_only' ? buildPortalLink() : undefined,
         });
       }
       loadData();
@@ -405,6 +425,7 @@ export default function AdminScreen() {
       setShowEditModal(false);
       setEditingUser(null);
       setEditPassword('');
+      setEditAccessScope('full');
       setEditClearApiKeys(false);
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Erreur lors de la mise à jour';
@@ -553,6 +574,9 @@ export default function AdminScreen() {
       if (userFilter === 'onboarding_pending') {
         return !user.onboarding_completed;
       }
+      if (userFilter === 'audit_portal') {
+        return user.access_scope === 'external_site_audit_only';
+      }
       return true;
     });
 
@@ -629,6 +653,13 @@ export default function AdminScreen() {
                 {item.onboarding_completed ? 'Onboarding fini' : 'Onboarding a finir'}
               </Text>
             </View>
+            {item.access_scope === 'external_site_audit_only' ? (
+              <View style={[styles.userBadge, styles.userBadgeInfo]}>
+                <Text style={[styles.userBadgeText, styles.userBadgeTextInfo]}>
+                  Portail audit
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
       </View>
@@ -785,12 +816,19 @@ export default function AdminScreen() {
                   {lastProvisionedCredentials.email} • garde ce mot de passe ou partage-le maintenant.
                 </Text>
                 <Text style={styles.provisioningPassword}>🔐 {lastProvisionedCredentials.password}</Text>
+                {lastProvisionedCredentials.portalLink ? (
+                  <Text style={styles.provisioningLink}>🔗 {lastProvisionedCredentials.portalLink}</Text>
+                ) : null}
               </View>
               <View style={styles.provisioningActions}>
                 <TouchableOpacity
                   style={styles.provisioningAction}
                   onPress={() => copyText(
-                    `${lastProvisionedCredentials.email}\n${lastProvisionedCredentials.password}`,
+                    [
+                      `Email : ${lastProvisionedCredentials.email}`,
+                      `Mot de passe : ${lastProvisionedCredentials.password}`,
+                      lastProvisionedCredentials.portalLink ? `Lien : ${lastProvisionedCredentials.portalLink}` : null,
+                    ].filter(Boolean).join('\n'),
                     'Acces utilisateur'
                   )}
                 >
@@ -826,6 +864,7 @@ export default function AdminScreen() {
                 { id: 'pappers_ready', label: 'Pappers OK' },
                 { id: 'needs_keys', label: 'A completer' },
                 { id: 'onboarding_pending', label: 'Onboarding' },
+                { id: 'audit_portal', label: 'Portail audit' },
                 { id: 'disabled', label: 'Desactives' },
               ].map((filter) => (
                 <TouchableOpacity
@@ -1011,6 +1050,50 @@ export default function AdminScreen() {
               </View>
             </View>
 
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Type d'acces</Text>
+              <View style={styles.maintenanceRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.maintenanceOption,
+                    newUserAccessScope === 'full' && styles.maintenanceOptionActive
+                  ]}
+                  onPress={() => setNewUserAccessScope('full')}
+                >
+                  <Text
+                    style={[
+                      styles.maintenanceOptionText,
+                      newUserAccessScope === 'full' && styles.maintenanceOptionTextActive
+                    ]}
+                  >
+                    Application complete
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.maintenanceOption,
+                    newUserAccessScope === 'external_site_audit_only' && styles.maintenanceOptionActive
+                  ]}
+                  onPress={() => {
+                    setNewUserAccessScope('external_site_audit_only');
+                    setNewUserRole('user');
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.maintenanceOptionText,
+                      newUserAccessScope === 'external_site_audit_only' && styles.maintenanceOptionTextActive
+                    ]}
+                  >
+                    Portail audit sites
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.maintenanceHint}>
+                Le portail audit donne acces uniquement au scan de sites externes, a l'onboarding API et a l'export Excel.
+              </Text>
+            </View>
+
             <TouchableOpacity
               style={[styles.createButton, creating && styles.createButtonDisabled]}
               onPress={handleCreateUser}
@@ -1114,6 +1197,50 @@ export default function AdminScreen() {
                       </Text>
                     </TouchableOpacity>
                   </View>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Type d'acces</Text>
+                  <View style={styles.maintenanceRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.maintenanceOption,
+                        editAccessScope === 'full' && styles.maintenanceOptionActive,
+                      ]}
+                      onPress={() => setEditAccessScope('full')}
+                    >
+                      <Text
+                        style={[
+                          styles.maintenanceOptionText,
+                          editAccessScope === 'full' && styles.maintenanceOptionTextActive,
+                        ]}
+                      >
+                        Application complete
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.maintenanceOption,
+                        editAccessScope === 'external_site_audit_only' && styles.maintenanceOptionActive,
+                      ]}
+                      onPress={() => {
+                        setEditAccessScope('external_site_audit_only');
+                        setEditRole('user');
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.maintenanceOptionText,
+                          editAccessScope === 'external_site_audit_only' && styles.maintenanceOptionTextActive,
+                        ]}
+                      >
+                        Portail audit sites
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.maintenanceHint}>
+                    Ce mode limite le compte a une experience separee dediee a l'audit de sites externes.
+                  </Text>
                 </View>
 
                 <View style={styles.inputGroup}>
@@ -1412,6 +1539,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#A7F3D0',
+  },
+  provisioningLink: {
+    fontSize: 12,
+    color: '#BFDBFE',
+    lineHeight: 18,
   },
   provisioningActions: {
     alignItems: 'flex-end',

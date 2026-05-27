@@ -6,6 +6,64 @@ import { API_URL } from './api';
 
 const SESSION_STORAGE_KEYS = ['token', 'user', 'userName', 'userEmail'];
 
+export type AccessScope = 'full' | 'external_site_audit_only';
+
+export interface StoredUserProfile {
+  id?: string;
+  email?: string;
+  role?: 'admin' | 'user';
+  access_scope?: AccessScope | string;
+  name?: string;
+}
+
+export const AUDIT_PORTAL_HOME_ROUTE = '/portail-audit-sites';
+export const AUDIT_PORTAL_LOGIN_ROUTE = '/portail-audit-sites-login';
+
+export function normalizeAccessScope(value?: string | null): AccessScope {
+  return value === 'external_site_audit_only' ? 'external_site_audit_only' : 'full';
+}
+
+export function isExternalAuditOnlyUser(user?: StoredUserProfile | null) {
+  return normalizeAccessScope(user?.access_scope) === 'external_site_audit_only';
+}
+
+export function getDefaultRouteForUser(user?: StoredUserProfile | null) {
+  return isExternalAuditOnlyUser(user) ? AUDIT_PORTAL_HOME_ROUTE : '/home';
+}
+
+export function isAllowedForExternalAuditPortal(pathname?: string | null) {
+  const currentPath = (pathname || '').split('?')[0];
+  return [
+    AUDIT_PORTAL_HOME_ROUTE,
+    AUDIT_PORTAL_LOGIN_ROUTE,
+    '/audit-site-externe',
+    '/settings',
+  ].includes(currentPath);
+}
+
+export async function persistAuthenticatedUser(user: StoredUserProfile, fallbackEmail?: string) {
+  const email = user?.email || fallbackEmail || '';
+  const name = user?.name || email;
+
+  await AsyncStorage.multiSet([
+    ['user', JSON.stringify(user)],
+    ['userEmail', email],
+    ['userName', name],
+  ]);
+}
+
+export async function getStoredUserProfile(): Promise<StoredUserProfile | null> {
+  const rawUser = await AsyncStorage.getItem('user');
+  if (!rawUser) return null;
+
+  try {
+    return JSON.parse(rawUser);
+  } catch (error) {
+    console.error('Unable to parse stored user profile:', error);
+    return null;
+  }
+}
+
 export async function clearStoredSession() {
   await AsyncStorage.multiRemove(SESSION_STORAGE_KEYS);
 }
@@ -38,10 +96,13 @@ export async function validateStoredSession(router?: { replace: (path: string) =
   }
 
   try {
-    await axios.get(`${API_URL}/api/auth/me`, {
+    const response = await axios.get(`${API_URL}/api/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    return true;
+    if (response.data) {
+      await persistAuthenticatedUser(response.data);
+    }
+    return response.data;
   } catch (error: any) {
     const wasAuthError = await handleAuthError(error, true, router);
     if (wasAuthError) {
